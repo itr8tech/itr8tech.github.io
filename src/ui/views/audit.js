@@ -1,0 +1,127 @@
+// src/ui/views/audit.js — #/audit: every flagged link across all workspaces, in one place, with a
+// manual status override at two strengths. "Good" = soft verify (trusted ~90 days, then the auditor
+// re-checks it); "Pin" = hard opt-out (always good, never re-checked); "Broken" flags a known-dead
+// link; "Auto" hands it back to the auditor now. Soft overrides EXPIRE so a link that dies later is
+// eventually re-flagged; pinned ones never do (mergeAuditResults enforces both). Overrides commit to
+// audit/overrides.json, so they travel between devices and the audit workflow skips them.
+import { el, clear } from '../dom.js';
+
+function relTime(ts) {
+  if (!ts) return '';
+  const d = Date.now() - ts;
+  if (d < 3600000) return `${Math.max(1, Math.floor(d / 60000))}m ago`;
+  if (d < 86400000) return `${Math.floor(d / 3600000)}h ago`;
+  if (d < 30 * 86400000) return `${Math.floor(d / 86400000)}d ago`;
+  return new Date(ts).toISOString().slice(0, 10);
+}
+function category(b) {
+  if (b.check_method === 'manual' || b.check_method === 'pinned') return b.available === 1 ? 'verified' : 'broken';
+  if (b.requires_auth || b.status_label === 'Auth required') return 'auth';
+  if (b.available === 0 && (b.status_label === 'Timeout' || b.status_label === 'Blocked')) return 'unreachable';
+  if (b.available === 0) return 'broken';
+  if (b.redirect_url) return 'redirect';
+  return 'other';
+}
+const SECTIONS = [
+  ['broken', '🔴 Broken'],
+  ['auth', '🔑 Auth required (login-walled — usually fine)'],
+  ['redirect', '↪️ Redirected'],
+  ['unreachable', '⚠️ Couldn’t verify (timeout / blocked — may be fine on-network)'],
+  ['verified', '✅ Verified good (you marked these)'],
+];
+// A short human note on the override's lifetime, shown in the row meta.
+function overrideNote(b) {
+  if (b.override === 'pinned') return 'pinned · never re-checked';
+  if (b.override === 'soft') return b.days_left > 0 ? `re-checks in ${b.days_left}d` : 'expired · re-scans next audit';
+  return '';
+}
+// Instant, focus-friendly tooltips (title= takes ~1s to appear and never shows on focus).
+const ACTIONS = [
+  ['good', '✓ Good', 'Verified good: trust this link for 90 days, then the auditor re-checks it automatically. Use for false positives you’re fairly sure about.'],
+  ['pin', '📌 Pin good', 'Pin as good: never audit this link again. Use when you’re certain it’s fine and don’t want it re-checked — press Auto to undo.'],
+  ['broken', '✗ Broken', 'Mark broken: flag this link as dead even if the checker passed it (e.g. a “page not found” that still returns 200).'],
+  ['auto', '↺ Auto', 'Back to automatic: clear your override now and let the next audit decide this link’s status.'],
+];
+
+export default async function mount(container, params, ctx) {
+  const root = el('div', { class: 'view-content audit-view' });
+  container.append(root);
+  const controller = { title: 'Link audit', refresh, destroy() {} };
+  const openState = {};   // section key → open? — survives refresh() re-renders after each action
+  let tipSeq = 0;
+  const act = async (fn) => { try { await fn(); } catch (e) { ctx.announce(e.message || 'Action failed.', { assertive: true }); } };
+
+  function ttButton(label, tip, fn) {
+    const id = `audit-tt-${++tipSeq}`;
+    const b = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'aria-describedby': id }, label);
+    b.addEventListener('click', fn);
+    return el('span', { class: 'tt-wrap' }, b, el('span', { class: 'tt', role: 'tooltip', id }, tip));
+  }
+
+  function extLink(href, text) {
+    return el('a', { class: 'audit-row__url', href, target: '_blank', rel: 'noopener noreferrer nofollow ugc' }, text);
+  }
+
+  function row(b, primary) {
+    const safe = ctx.md.safeUrl(b.url);
+    const safeRedirect = b.redirect_url ? ctx.md.safeUrl(b.redirect_url) : null;
+    const status = `${b.http_status ? b.http_status + ' ' : ''}${b.status_label || (b.available === 0 ? 'Broken' : 'OK')}`;
+    const li = el('li', { class: 'audit-row', 'data-id': b.id, 'data-focus-key': `audit:${b.id}` },
+      el('div', { class: 'audit-row__head' }, el('strong', {}, b.title || b.url)),
+      // The URL itself, visible and clickable — you can't judge a redirect (or recognise a false
+      // positive) without seeing the address.
+      safe ? extLink(safe, b.url) : el('span', { class: 'audit-row__url blocked' }, `${b.url} (link blocked — unsafe scheme)`),
+      safeRedirect ? el('div', { class: 'audit-row__redirect' }, '↪ now redirects to ', extLink(safeRedirect, b.redirect_url)) : null,
+      el('div', { class: 'audit-row__meta muted' },
+        el('a', { href: `#/pathway/${encodeURIComponent(b.pathway_id)}` }, b.pathway_name),
+        ` · ${b.workspace || 'local'} · ${status}${b.override ? ` · ${overrideNote(b)}` : (b.check_method ? ` · ${b.check_method}` : '')} · ${relTime(b.last_checked)}`));
+    if (primary) li.append(el('div', { class: 'audit-row__actions' },
+      ACTIONS.map(([status2, label, tip]) => ttButton(label, tip, () => act(() => ctx.db.setBookmarkAuditStatus({ id: b.id, status: status2 }))))));
+    return li;
+  }
+
+  function section(key, label, items, primary) {
+    const sum = el('summary', { class: 'audit-section__summary' },
+      el('h2', { class: 'audit-section__title' }, `${label} (${items.length})`));
+    const list = el('ul', { class: 'audit-list', role: 'list' });
+    for (const b of items) list.append(row(b, primary));
+    const d = el('details', { class: 'audit-section', open: openState[key] !== false }, sum, list);
+    d.addEventListener('toggle', () => { openState[key] = d.open; });
+    return d;
+  }
+
+  const setAll = (open) => {
+    for (const d of root.querySelectorAll('details.audit-section')) d.open = open;   // toggle handlers record openState
+  };
+
+  async function refresh() {
+    const flagged = await ctx.db.listFlaggedBookmarks();
+    const primary = ctx.isPrimary();
+    // Section headers stick just below the (sticky) app header — measure it rather than guess.
+    root.style.setProperty('--sticky-top', `${document.querySelector('.app-header')?.offsetHeight || 56}px`);
+    clear(root);
+    root.append(el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Link audit'));
+    root.append(el('p', { class: 'muted audit-intro' }, 'Flagged links across all workspaces. “Good” trusts a false positive for ~90 days then lets the auditor re-check it; “Pin good” trusts it forever; “Broken” flags a known-dead link; “Auto” hands it back to the auditor now. Overrides are committed to the repo (audit/overrides.json) with your next commit, so they apply on every device and the audit workflow skips those links.'));
+
+    if (!flagged.length) {
+      root.append(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
+      return;
+    }
+    const expand = el('button', { type: 'button', class: 'btn btn--sm' }, 'Expand all');
+    const collapse = el('button', { type: 'button', class: 'btn btn--sm' }, 'Collapse all');
+    expand.addEventListener('click', () => setAll(true));
+    collapse.addEventListener('click', () => setAll(false));
+    root.append(el('div', { class: 'audit-controls' }, expand, collapse));
+
+    const byCat = {};
+    for (const b of flagged) (byCat[category(b)] ||= []).push(b);
+    for (const [key, label] of SECTIONS) {
+      const items = byCat[key];
+      if (!items?.length) continue;
+      root.append(section(key, label, items, primary));
+    }
+  }
+
+  await refresh();
+  return controller;
+}

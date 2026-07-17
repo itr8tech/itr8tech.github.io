@@ -640,6 +640,27 @@ function materializePathway(wsId, wrap, order, images = {}) {
   return quarantined;
 }
 
+// P6: import already-converted pathway objects (e.g. from the legacy curator-pathways.json) into an
+// EXISTING workspace as plain local content. sync_state is NOT touched — everything arrives
+// UNCOMMITTED, so the next commit writes the v2 layout to the repo. Existing pathway ids are
+// SKIPPED, never clobbered (an accidental re-import is a no-op), which also makes the offer
+// idempotent across devices (deterministic ids from the converter).
+function importPathwaysIntoWorkspace({ workspaceId, pathways = [], images = {} }) {
+  if (!db.selectValue('SELECT 1 FROM workspaces WHERE id=?', [workspaceId])) throw new Error('Workspace not found.');
+  let added = 0, skipped = 0, quarantined = 0;
+  db.transaction(() => {
+    const base = db.selectValue('SELECT COALESCE(MAX(sort_order),-1)+1 FROM pathways WHERE workspace_id=?', [workspaceId]);
+    for (const wrap of pathways) {
+      const p = wrap?.pathway ?? wrap;
+      if (!p?.id || !p?.name) { skipped++; continue; }
+      if (db.selectValue('SELECT 1 FROM pathways WHERE id=?', [String(p.id)])) { skipped++; continue; }
+      quarantined += materializePathway(workspaceId, wrap, base + added, images);
+      added++;
+    }
+  });
+  return { added, skipped, quarantined };
+}
+
 // Apply a resolved pull, transactionally + idempotently, then advance the sync baseline.
 function applyPull({ workspaceId, decisions = [], remoteOrder = [], images = {}, commitSha = null, treeSha = null, filesMap = null, workspaceHash = null, manifestHash = null }) {
   let added = 0, replaced = 0, deleted = 0, quarantined = 0, park = PARK;
@@ -924,7 +945,7 @@ const OPS = {
   createWorkspace, getWorkspaceFull, setWorkspaceRepo, setWorkspaceRepoMeta,
   getSyncState, setSyncState, markCommitted,
   serializeWorkspace, getUncommittedCount, serializePathway,
-  getLocalHashes, hasAttachmentSha, applyPull,
+  getLocalHashes, hasAttachmentSha, applyPull, importPathwaysIntoWorkspace,
   // ===== P4 inbox =====
   addInboxItem, listInbox, countInboxUnsorted, updateInboxStatus, deleteInboxItem, triageInboxItem,
   // ===== P5 link audit =====

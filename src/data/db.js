@@ -150,6 +150,8 @@ export const db = {
   getLocalHashes: (workspaceId) => call('getLocalHashes', { workspaceId }),
   hasAttachmentSha: (sha) => call('hasAttachmentSha', sha),
   applyPull: (a) => call('applyPull', a, { type: 'change', entity: 'pathways' }),
+  // P6: converted-legacy import into an existing workspace → '*' so dashboard + sync status refresh
+  importPathwaysIntoWorkspace: (a) => call('importPathwaysIntoWorkspace', a, { type: 'change', entity: '*' }),
 
   // ================= P4: capture inbox =================
   drainCaptureOutbox: () => drainCaptureOutbox(),

@@ -4,6 +4,8 @@
 // existing one (pull lands in step 6). Every mutating control is data-requires-primary.
 import { el } from './dom.js';
 import { announce } from './a11y.js';
+import { offerLegacyImport } from './sync-indicator.js';
+import { LEGACY_FILE } from '/src/data/legacy.js';
 
 function mountDialog(dlg, invoker) {
   document.body.append(dlg);
@@ -13,6 +15,7 @@ function mountDialog(dlg, invoker) {
 
 const trimSlashes = (s) => String(s || '').replace(/^\/+|\/+$/g, '');
 const manifestPathFor = (path) => (trimSlashes(path) ? trimSlashes(path) + '/' : '') + 'manifest.json';
+const legacyPathFor = (path) => (trimSlashes(path) ? trimSlashes(path) + '/' : '') + LEGACY_FILE;
 
 // Accept "owner/repo" or a pasted GitHub URL (https://github.com/owner/repo[/…][.git]).
 function parseRepoRef(s) {
@@ -120,17 +123,31 @@ export function openConnectRepo({ workspace = null, invoker, ctx }) {
         const res = await ctx.sync.pull(wsId, { interactive: true });
         dlg.close('ok');
         if (res.needsReview) { announce('Repository connected. Review the incoming changes.'); ctx.navigate(`/merge/${encodeURIComponent(wsId)}`); return; }
+        if (res.legacy) {                                   // v2 manifest is an empty stub beside a legacy file
+          announce('Repository connected.');
+          offerLegacyImport(await ctx.db.getWorkspace(wsId), ctx);
+          return;
+        }
         const a = res.applied || {};
         const bits = [];
         if (a.added) bits.push(`${a.added} imported`);
         if (a.replaced) bits.push(`${a.replaced} updated from the repository`);
         announce(bits.length ? `Repository connected. ${bits.join(', ')}.` : 'Repository connected and imported.');
         return;
-      } else {
-        status.textContent = 'Initializing repository…';
-        await ctx.sync.initialize(wsId);
-        announce('Repository connected and initialized.');
       }
+      // P6: no v2 manifest — but a LEGACY repo (curator-pathways.json) must NOT be blind-initialized
+      // (that writes a stub empty manifest beside real content). Offer the import instead; the
+      // first commit after importing writes the v2 layout.
+      const legacyHead = await client.headFile(o, r, legacyPathFor(pth), br);
+      if (legacyHead.exists) {
+        dlg.close('ok');
+        announce('Repository connected.');
+        offerLegacyImport(await ctx.db.getWorkspace(wsId), ctx);
+        return;
+      }
+      status.textContent = 'Initializing repository…';
+      await ctx.sync.initialize(wsId);
+      announce('Repository connected and initialized.');
       dlg.close('ok');
     } catch (ex) {
       err.textContent = friendlyError(ex);

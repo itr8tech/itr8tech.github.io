@@ -18,7 +18,7 @@ const PRECACHE = [
   '/src/ui/views/dashboard.js', '/src/ui/views/merge.js', '/src/ui/views/notfound.js',
   '/src/ui/views/pathway.js', '/src/ui/views/sync.js', '/src/ui/views/inbox.js', '/src/ui/views/audit.js',
   // data modules
-  '/src/data/canonical.js', '/src/data/capture-outbox.js', '/src/data/coordinator.js', '/src/data/db-worker.js',
+  '/src/data/canonical.js', '/src/data/capture-outbox.js', '/src/data/coordinator.js', '/src/data/db-worker.js', '/src/data/legacy.js',
   '/src/data/db.js', '/src/data/github.js', '/src/data/merge.js', '/src/data/schema.js', '/src/data/secrets.js',
   '/src/data/serialize.js', '/src/data/sync.js',
   // vendor (SQLite-WASM) — the worker instantiates these; precache so the DB boots offline

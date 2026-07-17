@@ -18,9 +18,42 @@ export async function doPull(ws, ctx) {
   try {
     const res = await ctx.sync.pull(ws.id);
     if (res.needsReview) { ctx.navigate(`/merge/${encodeURIComponent(ws.id)}`); return; }
+    if (res.legacy) { offerLegacyImport(ws, ctx); return; }         // P6: unmigrated legacy repo
+    if (res.ok === false && res.reason === 'no-manifest') {
+      announce('This repository has no PathCurator content yet — your first Commit will initialize it.', { assertive: true });
+      return;
+    }
     if (res.upToDate) announce('Already up to date.');
     else announce(`Pulled: ${res.applied.added} added, ${res.applied.replaced} updated, ${res.applied.deleted} removed.`);
   } catch (e) { announce(e.message || 'Could not pull.', { assertive: true }); }
+}
+
+// P6: the repo stores its pathways in the legacy single-file format — offer to import them.
+export function offerLegacyImport(ws, ctx, invoker = null) {
+  const dlg = el('dialog', { class: 'pc-editor' });
+  const err = el('p', { class: 'field-error', role: 'alert' });
+  const importBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-requires-primary': true, 'data-legacy-import': ws.id }, 'Import pathways');
+  const form = el('form', { 'aria-labelledby': 'legacy-h' },
+    el('h2', { id: 'legacy-h', 'data-view-heading': true, tabindex: -1 }, `Legacy PathCurator repository — ${ws.org_label}`),
+    el('p', {}, 'This repository stores its pathways in the legacy single-file format (', el('code', {}, 'curator-pathways.json'), '). Import them into this workspace?'),
+    el('p', { class: 'muted' }, 'Imported pathways arrive as uncommitted local changes — review them, then Commit to write them to the repository in the new per-pathway format. The legacy file itself is not modified, so the old app keeps working alongside.'),
+    err,
+    el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Not now'), importBtn));
+  form.querySelector('.form-actions .btn').addEventListener('click', () => dlg.close('cancel'));
+  importBtn.addEventListener('click', async () => {
+    err.textContent = ''; importBtn.disabled = true; dlg.setAttribute('aria-busy', 'true');
+    try {
+      const r = await ctx.sync.importLegacy(ws.id);
+      announce(`Imported ${r.added} pathway${r.added === 1 ? '' : 's'} from the legacy file${r.quarantined ? ` (${r.quarantined} unsafe link${r.quarantined === 1 ? '' : 's'} skipped)` : ''}. Commit when ready to write the new format.`);
+      dlg.close('ok');
+    } catch (e) { err.textContent = e.message || 'Could not import.'; importBtn.disabled = false; }
+    finally { dlg.removeAttribute('aria-busy'); }
+  });
+  dlg.append(form);
+  document.body.append(dlg);
+  dlg.addEventListener('close', () => { dlg.remove(); invoker?.focus?.(); }, { once: true });
+  dlg.showModal();
+  form.querySelector('h2').focus();
 }
 
 // A standalone status chip (no actions) — for follower tabs and the sync overview.

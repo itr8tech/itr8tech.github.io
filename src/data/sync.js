@@ -6,6 +6,7 @@
 import { isConflict } from './github.js';
 import { buildPlan, resolutionToAction, nonInteractiveAction } from './merge.js';
 import { contentHash, manifestHashOf, workspaceHashOf } from './canonical.js';
+import { convertLegacyPathways, LEGACY_FILE } from './legacy.js';
 
 const READONLY = 'This tab is read-only — PathCurator is active in another tab.';
 
@@ -257,7 +258,20 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     const ref = await client.getRef();
     if (!ref) return { ok: true, upToDate: true, empty: true };
     const state = await db.getSyncState(wsId);
-    if (state?.lastCommitSha === ref.sha) return { ok: true, upToDate: true };   // remote hasn't moved
+    if (state?.lastCommitSha === ref.sha) {
+      // Remote hasn't moved — but if this workspace is still EMPTY, check for an unmigrated legacy
+      // file anyway. (The stub-manifest state — an empty v2 layout committed next to
+      // curator-pathways.json — would otherwise sit "in sync" forever with no import offer.)
+      let legacy = null;
+      try {
+        if (!Object.keys(await db.getLocalHashes(wsId)).length) {
+          const t = await client.getTree((await client.getCommit(ref.sha)).treeSha);
+          const e = (t.tree || []).find((x) => x.type === 'blob' && x.path === joinPath(P, LEGACY_FILE));
+          if (e) legacy = { sha: e.sha };
+        }
+      } catch { /* best-effort — never block the up-to-date answer */ }
+      return { ok: true, upToDate: true, ...(legacy ? { legacy } : {}) };
+    }
     const baseFiles = state?.files || {};
     const firstImport = !state;             // never synced → this pull IS the import (no baseline)
 
@@ -267,11 +281,19 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     const pathToSha = new Map();
     for (const e of tree.tree) if (e.type === 'blob') pathToSha.set(e.path, e.sha);
 
+    // P6: a legacy single-file repo (curator-pathways.json). No v2 manifest at all → the pull can't
+    // proceed, but the honest answer is "legacy repo — offer the import", not "no-manifest".
+    const legacySha = pathToSha.get(joinPath(P, LEGACY_FILE)) || null;
     const manifestSha = pathToSha.get(joinPath(P, 'manifest.json'));
-    if (!manifestSha) return { ok: false, reason: 'no-manifest' };
+    if (!manifestSha) {
+      if (legacySha) return { ok: true, legacyOnly: true, legacy: { sha: legacySha } };
+      return { ok: false, reason: 'no-manifest' };
+    }
     const manifest = await client.getBlobJson(manifestSha);
     const remoteIndex = (manifest.pathways || []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     const remoteOrder = remoteIndex.map((e) => e.id);
+    // v2 manifest present but EMPTY beside a legacy file (the stub-manifest state) → same offer.
+    const legacyOffer = legacySha && !remoteIndex.length ? { sha: legacySha } : null;
 
     // P5: FETCH the audit results side-channel here (once, if its sha moved), but MERGE it only AFTER
     // the content is applied — the bookmarks it keys on must exist first. Its sha lives in a SEPARATE
@@ -361,7 +383,32 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
       ...plan.review.map((i) => toDecision({ ...i, autoAction: nonInteractiveAction(i) }, remoteObjs)),
     ].filter(Boolean);
     const applied = await applyAndAdvance(wsId, context, decisions);
-    return { ok: true, needsReview: false, applied, plan };
+    return { ok: true, needsReview: false, applied, plan, ...(legacyOffer ? { legacy: legacyOffer } : {}) };
+  }
+
+  // P6: import the legacy curator-pathways.json into this (connected, otherwise-empty) workspace.
+  // Converted pathways arrive as UNCOMMITTED local content — no sync-state change — so the next
+  // commit writes the v2 per-pathway layout into the repo; the legacy file itself is never touched
+  // (the old app keeps working against it). Idempotent: already-present pathway ids are skipped.
+  async function importLegacy(wsId) {
+    if (!isPrimary()) throw new Error(READONLY);
+    const ws = await db.getWorkspace(wsId);
+    if (!ws || !ws.owner || !ws.repo) throw new Error('This workspace is not connected to a repo.');
+    const token = await db.getWorkspacePat(wsId);
+    if (!token) throw new Error('No access token is stored for this workspace.');
+    const client = makeClient(ws, token);
+    const P = ws.path || '';
+    const ref = await client.getRef();
+    if (!ref) throw new Error('The repository is empty.');
+    const tree = await client.getTree((await client.getCommit(ref.sha)).treeSha);
+    const entry = (tree.tree || []).find((e) => e.type === 'blob' && e.path === joinPath(P, LEGACY_FILE));
+    if (!entry) throw new Error(`No legacy ${LEGACY_FILE} in this repository.`);
+    const raw = await client.getBlobJson(entry.sha);
+    const { pathways, images } = await convertLegacyPathways(raw);
+    if (!pathways.length) return { ok: true, total: 0, added: 0, skipped: 0, quarantined: 0 };
+    const r = await db.importPathwaysIntoWorkspace({ workspaceId: wsId, pathways, images });
+    await refreshOne(wsId);
+    return { ok: true, total: pathways.length, ...r };
   }
 
   // Apply an interactively-reviewed pull. resolutions: { [pathwayId]: choice } for review items.
@@ -466,7 +513,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     init: () => refreshAll(),
     refreshOne, refreshAll,
     handleChange: (evt) => { if (!evt || evt.entity === '*' || ['pathways', 'steps', 'bookmarks', 'workspaces', 'sync'].includes(evt.entity)) refreshAll(); },
-    commit, initialize, pull, resolvePull,
+    commit, initialize, pull, resolvePull, importLegacy,
     fetchCommittedPathways, discardLocalChanges,
     getPendingPull: (wsId) => pendingPull.get(wsId) || null,
     getAutoCommit, setAutoCommit, startTimers, stopTimers,

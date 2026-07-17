@@ -735,8 +735,10 @@ function updateInboxStatus({ id, status }) {
 const deleteInboxItem = ({ id }) => { db.exec({ sql: 'DELETE FROM inbox WHERE id=?', bind: [id] }); return { id }; };
 
 // File an inbox item into a step → a URL-guarded bookmark (assertSafeUrl, exactly like createBookmark),
-// mark the item triaged, and link filed_bookmark_id. One transaction.
-function triageInboxItem({ id, step_id, title, url, description = '', context = '', required = 1, content_type }) {
+// mark the item triaged, and link filed_bookmark_id. One transaction. Fields NOT passed fall back to
+// what capture collected — the page's meta description, and the user's own note → context — so
+// filing never silently strips them; an explicit '' (a cleared field) is respected ('' isn't nullish).
+function triageInboxItem({ id, step_id, title, url, description, context, required = 1, content_type }) {
   if (!step_id) throw new Error('Choose a step to file this into.');
   const item = db.selectObject('SELECT * FROM inbox WHERE id=?', [id]);
   if (!item) throw new Error('Inbox item not found.');
@@ -748,7 +750,8 @@ function triageInboxItem({ id, step_id, title, url, description = '', context = 
       sql: `INSERT INTO bookmarks (id,step_id,title,url,url_norm,description,context,required,content_type,added_at,sort_order,extra_json)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       bind: [bmId, step_id, String(title ?? item.title ?? '').trim(), safe, normalizeUrl(safe),
-             description, context, required ? 1 : 0, ct, Date.now(), nextOrder('bookmarks', 'step_id', step_id), null],
+             description ?? item.description ?? '', context ?? item.note ?? '',
+             required ? 1 : 0, ct, Date.now(), nextOrder('bookmarks', 'step_id', step_id), null],
     });
     db.exec({ sql: "UPDATE inbox SET status='triaged', triaged_at=?, filed_bookmark_id=? WHERE id=?", bind: [Date.now(), bmId, id] });
     touchPathway(pathwayIdOfStep(step_id));

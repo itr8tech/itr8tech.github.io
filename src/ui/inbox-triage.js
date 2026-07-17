@@ -31,6 +31,10 @@ export async function openInboxTriage({ item, invoker, ctx }) {
   const stepSel = el('select', { name: 'step' });
   const title = el('input', { name: 'title', type: 'text', value: item.title || '' });
   const url = el('input', { name: 'url', type: 'url', required: true, value: item.url || '' });
+  // Prefill what capture collected: the page's meta description, and the user's own note as the
+  // bookmark's context — visible + editable here so filing never silently drops them.
+  const description = el('textarea', { name: 'description', rows: 3 }, item.description || '');
+  const context = el('textarea', { name: 'context', rows: 2 }, item.note || '');
   const ct = el('select', { name: 'content_type' }, ...CONTENT_TYPES.map((v) => el('option', { value: v, selected: v === (item.content_type || 'Read') }, v)));
   const required = el('input', { type: 'checkbox', name: 'required', checked: true });
   const err = el('p', { class: 'field-error', role: 'alert' });
@@ -60,6 +64,8 @@ export async function openInboxTriage({ item, invoker, ctx }) {
     el('label', {}, 'Step', stepSel),
     el('label', {}, 'Title', title),
     el('label', {}, 'Link', url),
+    el('label', {}, 'Description', description),
+    el('label', {}, 'Context', context),
     el('div', { class: 'field-row' }, el('label', {}, 'Type', ct), el('label', {}, required, ' Required')),
     err,
     el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Cancel'), submit));
@@ -72,7 +78,8 @@ export async function openInboxTriage({ item, invoker, ctx }) {
     try {
       const pwName = pwSel.selectedOptions[0]?.textContent || 'the pathway';
       await ctx.db.triageInboxItem({ id: item.id, step_id: stepSel.value, title: title.value.trim(),
-        url: url.value.trim(), content_type: ct.value, required: required.checked ? 1 : 0 });
+        url: url.value.trim(), description: description.value.trim(), context: context.value.trim(),
+        content_type: ct.value, required: required.checked ? 1 : 0 });
       announce(`Filed into ${pwName}.`);
       dlg.close('ok');
     } catch (ex) { err.textContent = ex.message || 'Could not file this item.'; submit.disabled = false; }

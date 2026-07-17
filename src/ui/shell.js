@@ -39,20 +39,36 @@ export function errorPane(msg) {
     el('p', {}, el('a', { href: '#/' }, 'Return to the dashboard')));
 }
 
-// Shown when on-device storage (OPFS) is unavailable — private/incognito windows, or a browser
-// older than Chrome 108 / Firefox 111 / Safari 16.4. (O11 / spec §6.4.)
+// Shown when the app can't run here. Diagnosed by LIKELIEST CAUSE (main.js picks the kind):
+//   insecure   — plain http:// on a non-localhost origin (the everything-is-disabled case)
+//   storage    — secure context but OPFS refused: private window / locked-down profile
+//   oldbrowser — WebAssembly/Workers truly absent: ancient browser OR policy-disabled
+// Practically every current browser supports the features — so a bare "unsupported browser"
+// message is almost always wrong; lead with the environmental causes instead. (O11 / spec §6.4.)
 export function capabilityScreen({ kind = 'storage' } = {}) {
   const card = el('div', { class: 'capability card', role: 'alert' },
     el('h1', { 'data-view-heading': true, tabindex: -1 }, "PathCurator can’t save data here"));
-  if (kind === 'oldbrowser') {
+  if (kind === 'insecure') {
     card.append(
-      el('p', {}, 'This browser is missing features PathCurator needs to store your pathways on this device.'),
-      el('p', {}, 'PathCurator works in Chrome/Edge 108+, Firefox 111+, and Safari 16.4+. Please update your browser and reload.'));
+      el('p', {}, 'You’re viewing PathCurator over an insecure connection (', el('code', {}, `http://${location.host}`),
+        '). Browsers only unlock on-device storage — where PathCurator keeps your pathways — on ',
+        el('strong', {}, 'HTTPS'), ' pages (or on localhost during development).'),
+      el('p', {}, el('strong', {}, 'Open the https:// address for this app instead.'),
+        ' The browser itself is fine — it’s the connection that’s the blocker.'));
+  } else if (kind === 'oldbrowser') {
+    card.append(
+      el('p', {}, 'This browser has no WebAssembly or Web Worker support, which PathCurator needs to run its on-device database.'),
+      el('p', {}, 'Every current browser (Chrome/Edge, Firefox, Safari) supports these — so this usually means a ',
+        el('strong', {}, 'very old browser'), ' or a ', el('strong', {}, 'managed system'),
+        ' where security policy has disabled WebAssembly. Try a current browser, or check with whoever administers this machine.'));
   } else {
     card.append(
-      el('p', {}, 'Your browser is blocking on-device storage. This almost always means you are in a ',
-        el('strong', {}, 'Private / Incognito'), ' window — PathCurator keeps your pathways in the browser’s private file system, which private windows do not allow.'),
-      el('p', {}, el('strong', {}, 'Open PathCurator in a normal window to continue.'), ' Nothing is lost.'),
+      el('p', {}, 'Your browser refused access to on-device storage — PathCurator keeps your pathways in the browser’s private file system, and it isn’t available here. The usual reasons:'),
+      el('ul', {},
+        el('li', {}, el('strong', {}, 'Private / Incognito window'), ' — the most common cause; private windows block or discard this storage. Open PathCurator in a normal window.'),
+        el('li', {}, el('strong', {}, 'A locked-down or managed browser'), ' — a workplace policy or a “block site data” privacy setting can disable it. Check with your administrator or allow site data for this site.'),
+        el('li', {}, el('strong', {}, 'A very old browser'), ' — needs Chrome/Edge 108+, Firefox 111+, or Safari 16.4+; every current version qualifies, so this is the least likely.')),
+      el('p', {}, 'Nothing is lost — your data lives wherever you normally use PathCurator, not here.'),
       el('p', { class: 'muted' }, 'Once you are set up, GitHub sync and JSON export are your off-device backups.'));
   }
   return el('div', { class: 'view-content' }, card);

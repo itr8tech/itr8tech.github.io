@@ -46,10 +46,14 @@ async function boot() {
     md: { renderMarkdown, renderMarkdownInto, sanitizeHtml, safeUrl }, signal: () => router.currentSignal(),
   };
 
-  // Static capability check → old browser / no OPFS surface before we even open the DB.
+  // Static capability check, surfaced by LIKELIEST CAUSE, not by feature list. An insecure origin
+  // (plain http:// on a LAN host) disables everything at once — diagnose it first, or the screen
+  // blames "old browser" for what is really a missing https.
   const missing = missingCapabilities();
   if (missing.length) {
-    const kind = (missing.includes('WebAssembly') || missing.includes('Web Workers') || missing.includes('secure-context')) ? 'oldbrowser' : 'storage';
+    const kind = missing.includes('secure-context') ? 'insecure'
+      : (missing.includes('WebAssembly') || missing.includes('Web Workers')) ? 'oldbrowser'
+      : 'storage';
     showCapability(shell, kind, { missing });
     return;
   }

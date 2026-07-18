@@ -33,11 +33,33 @@ function showCapability(shell, kind, meta) {
 // support is an enhancement; the app runs without it. The SW never opens the DB.
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || !self.isSecureContext) return;
-  navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('[sw] register failed:', e));
+  navigator.serviceWorker.register('/sw.js').then((reg) => {
+    // Update notice — only when an OLD version controls this page (not on first install). sw.js
+    // skipWaiting()s, so once the fresh worker activates, one reload gets the new (network-first)
+    // modules; no more guessing whether a deploy has landed.
+    if (!navigator.serviceWorker.controller) return;
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w?.addEventListener('statechange', () => { if (w.state === 'activated') showUpdateNotice(); });
+    });
+  }).catch((e) => console.warn('[sw] register failed:', e));
+}
+function showUpdateNotice() {
+  if (document.getElementById('sw-update')) return;
+  const reload = document.createElement('button');
+  reload.type = 'button'; reload.className = 'btn btn--sm'; reload.textContent = 'Reload';
+  reload.addEventListener('click', () => location.reload());
+  const note = document.createElement('div');
+  note.id = 'sw-update'; note.className = 'update-notice'; note.setAttribute('role', 'status');
+  note.append('A new version of PathCurator is available. ', reload);
+  document.body.append(note);
 }
 
 async function boot() {
   registerServiceWorker();
+  // Durability (O11): ask the browser to shield OPFS from storage-pressure eviction (Safari's
+  // ~7-day ITP eviction especially). Best-effort — denial is fine; sync + export are the backstop.
+  navigator.storage?.persisted?.().then((p) => p || navigator.storage.persist?.()).catch(() => {});
   const shell = shellMod.init();
   shell.setRole('pending', false);
 

@@ -778,8 +778,12 @@ const AUDIT_MANUAL_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 function mergeAuditResults({ workspaceId, results = {}, checkMethod = 'github-action' }) {
   let updated = 0;
   const cutoff = Date.now() - AUDIT_MANUAL_TTL_MS;   // manual overrides older than this are re-scannable
+  // A results file can predate a newly-added exemption (the Action only honours config.json on its
+  // NEXT run) — never let stale verdicts re-flag an exempt domain.
+  const exempt = db.selectObjects('SELECT domain FROM exempt_domains').map((r) => r.domain);
   db.transaction(() => {
     for (const [urlNorm, r] of Object.entries(results || {})) {
+      if (exempt.length && hostExempt(auditHostOf(urlNorm), exempt)) continue;
       const redirect = r && /^https?:\/\//i.test(String(r.redirectUrl ?? '')) ? String(r.redirectUrl) : null;
       db.exec({
         sql: `UPDATE bookmarks SET last_checked=?, available=?, http_status=?, status_label=?, redirect_url=?,
@@ -804,20 +808,52 @@ function mergeAuditResults({ workspaceId, results = {}, checkMethod = 'github-ac
 
 const listExemptDomains = () => db.selectObjects('SELECT domain, reason FROM exempt_domains ORDER BY domain');
 
-// Add an exemption AND clear any stale audit status for bookmarks it now covers (so a link that was
-// "broken" stops showing broken the moment it's exempted). Host match is exact-or-subdomain.
+// Upsert an exemption AND clear any stale audit status for bookmarks it now covers (so a link that
+// was "broken" stops showing broken the moment it's exempted). Host match is exact-or-subdomain.
+// NOT transactional — callers own the transaction (addExemptDomain, mergeExemptDomains).
+function applyExemptUpsert(d, reason) {
+  db.exec({ sql: 'INSERT INTO exempt_domains (domain,reason) VALUES (?,?) ON CONFLICT(domain) DO UPDATE SET reason=excluded.reason', bind: [d, String(reason || '')] });
+  for (const b of db.selectObjects('SELECT id,url FROM bookmarks WHERE last_checked IS NOT NULL')) {
+    if (hostExempt(auditHostOf(b.url), [d])) db.exec({ sql: AUDIT_CLEAR_SQL, bind: [b.id] });
+  }
+}
 function addExemptDomain({ domain, reason = '' }) {
   const d = String(domain || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
   if (!d || !/[.]/.test(d)) throw new Error('Enter a domain like example.com.');
-  db.transaction(() => {
-    db.exec({ sql: 'INSERT INTO exempt_domains (domain,reason) VALUES (?,?) ON CONFLICT(domain) DO UPDATE SET reason=excluded.reason', bind: [d, String(reason || '')] });
-    for (const b of db.selectObjects('SELECT id,url FROM bookmarks WHERE last_checked IS NOT NULL')) {
-      if (hostExempt(auditHostOf(b.url), [d])) db.exec({ sql: AUDIT_CLEAR_SQL, bind: [b.id] });
-    }
-  });
+  db.transaction(() => applyExemptUpsert(d, reason));
   return { domain: d };
 }
 const removeExemptDomain = ({ domain }) => { db.exec({ sql: 'DELETE FROM exempt_domains WHERE domain=?', bind: [String(domain || '').trim().toLowerCase()] }); return { domain }; };
+
+// ---- P5: committed exemptions side-channel (audit/config.json) ----
+// Exemptions must TRAVEL like overrides: the Action reads audit/config.json, and other devices
+// need the same list or a pulled results-merge would re-flag what one device exempted. serialize
+// feeds the commit; merge applies a pulled file with the same per-domain three-way as overrides
+// (base = the file as of the last sync; local changes win; remote adds/removes/reason-edits apply).
+const serializeExemptDomains = () => ({ exempt: db.selectObjects('SELECT domain, reason FROM exempt_domains ORDER BY domain') });
+function normExemptList(list) {
+  const m = new Map();
+  for (const e of list || []) {
+    const d = String(e?.domain ?? e ?? '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+    if (d && /[.]/.test(d)) m.set(d, String(e?.reason ?? ''));
+  }
+  return m;
+}
+function mergeExemptDomains({ remote = [], base = [] }) {
+  const R = normExemptList(remote), B = normExemptList(base);
+  const L = new Map(db.selectObjects('SELECT domain, reason FROM exempt_domains').map((r) => [r.domain, r.reason]));
+  let added = 0, removed = 0;
+  db.transaction(() => {
+    for (const d of new Set([...R.keys(), ...B.keys()])) {
+      const r = R.has(d) ? R.get(d) : null, b = B.has(d) ? B.get(d) : null, l = L.has(d) ? L.get(d) : null;
+      if (l !== b) continue;                                // local changed since last sync → local wins
+      if (r === b) continue;                                // remote unchanged → nothing to adopt
+      if (r !== null) { applyExemptUpsert(d, r); added++; }
+      else { db.exec({ sql: 'DELETE FROM exempt_domains WHERE domain=?', bind: [d] }); removed++; }
+    }
+  });
+  return { added, removed, normalized: [...R.entries()].map(([domain, reason]) => ({ domain, reason })) };
+}
 
 // Every audited bookmark that's flagged (unavailable / redirected / auth-walled) OR manually set
 // (soft 'manual' or hard 'pinned'), with its pathway + workspace context — for the #/audit overview.
@@ -953,6 +989,7 @@ const OPS = {
   addInboxItem, listInbox, countInboxUnsorted, updateInboxStatus, deleteInboxItem, triageInboxItem,
   // ===== P5 link audit =====
   mergeAuditResults, listExemptDomains, addExemptDomain, removeExemptDomain,
+  serializeExemptDomains, mergeExemptDomains,
   listFlaggedBookmarks, setBookmarkAuditStatus, serializeAuditOverrides, mergeAuditOverrides,
 };
 

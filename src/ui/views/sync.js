@@ -28,7 +28,7 @@ export default async function mount(container, params, ctx) {
     else if (total) root.append(el('p', { class: 'sync-summary', role: 'status' },
       `${total} uncommitted change${total === 1 ? '' : 's'} across ${connected.length} connected workspace${connected.length === 1 ? '' : 's'}.`));
     else if (Object.values(statuses).some((s) => s.auditDirty)) root.append(el('p', { class: 'sync-summary', role: 'status' },
-      'Audit override changes pending — commit to share them with your other devices.'));
+      'Audit changes pending (overrides or exemptions) — commit to share them with your other devices and the audit workflow.'));
     else root.append(el('p', { class: 'sync-summary sync-summary--ok', role: 'status' },
       connected.length ? 'All connected workspaces are in sync.' : 'No workspaces are connected to a repository yet.'));
 

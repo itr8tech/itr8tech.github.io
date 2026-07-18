@@ -15,6 +15,17 @@ const joinPath = (base, p) => (base ? `${String(base).replace(/\/+$/, '')}/${p}`
 // P5: the committed audit/overrides.json is compared via a STABLE string (sorted URLs, fixed entry
 // field order), so JSON key order can never fake a difference.
 const stableOverrides = (o = {}) => JSON.stringify(Object.keys(o).sort().map((u) => [u, o[u]?.available ? 1 : 0, o[u]?.method, o[u]?.setAt]));
+// Same for the exemption list ([{domain, reason}]) committed in audit/config.json.
+const stableExempt = (list = []) => JSON.stringify((list || []).map((e) => [e.domain, e.reason || '']).sort());
+// audit/config.json ⇄ exemption list. exemptDomains stays a plain string[] — the DEPLOYED checkers
+// read it that way — with reasons in a parallel app-only map.
+const exemptFromConfig = (cfg) => (Array.isArray(cfg?.exemptDomains) ? cfg.exemptDomains : [])
+  .map((d) => ({ domain: String(d).toLowerCase(), reason: String(cfg?.exemptReasons?.[String(d).toLowerCase()] ?? '') }));
+const exemptIntoConfig = (cfg, list) => ({
+  ...(cfg && typeof cfg === 'object' ? cfg : {}),          // preserve unknown keys (e.g. timeoutMs)
+  exemptDomains: list.map((e) => e.domain),
+  exemptReasons: Object.fromEntries(list.filter((e) => e.reason).map((e) => [e.domain, e.reason])),
+});
 
 function defaultMessage(ser) {
   if (!ser.baseCommitSha) return 'Initialize PathCurator workspace';
@@ -43,13 +54,20 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
   // sha), stored OUTSIDE sync_state (which commit/pull rebuild). It is the "base" of the three-way
   // overrides merge and the reference for "are there override changes to commit?".
   const OV_KEY = (wsId) => `audit_overrides_state:${wsId}`;
+  const EX_KEY = (wsId) => `audit_config_state:${wsId}`;   // last-synced audit/config.json (+ blob sha)
   async function getOverridesState(wsId) {
     try { return JSON.parse((await db.getSetting(OV_KEY(wsId))) || 'null'); } catch { return null; }
   }
+  async function getExemptState(wsId) {
+    try { return JSON.parse((await db.getSetting(EX_KEY(wsId))) || 'null'); } catch { return null; }
+  }
+  // "Audit-dirty" = override changes OR exemption changes since the last sync — both ride commits.
   async function auditOverridesDirty(wsId) {
     try {
       const ser = await db.serializeAuditOverrides(wsId);
-      return stableOverrides(ser.overrides) !== stableOverrides((await getOverridesState(wsId))?.overrides || {});
+      if (stableOverrides(ser.overrides) !== stableOverrides((await getOverridesState(wsId))?.overrides || {})) return true;
+      const ex = await db.serializeExemptDomains();
+      return stableExempt(ex.exempt) !== stableExempt((await getExemptState(wsId))?.exempt || []);
     } catch { return false; }
   }
 
@@ -107,12 +125,14 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
 
     const prior = (await db.getSyncState(wsId))?.files || {};
     const ser = await db.serializeWorkspace(wsId, ws.username);
-    // P5: override changes commit too — they ride along with content commits AND justify a commit of
-    // their own (marking a false positive "good" is a change worth pushing, with zero content edits).
+    // P5: audit-side changes commit too — overrides AND exemptions ride along with content commits
+    // AND justify a commit of their own (zero content edits).
     const ovSer = await db.serializeAuditOverrides(wsId);
     const ovChanged = stableOverrides(ovSer.overrides) !== stableOverrides((await getOverridesState(wsId))?.overrides || {});
+    const exSer = await db.serializeExemptDomains();
+    const exChanged = stableExempt(exSer.exempt) !== stableExempt((await getExemptState(wsId))?.exempt || []);
     const contentChanged = !!(ser.changedCount || ser.deletedCount || ser.manifestChanged);
-    if (!contentChanged && !ovChanged) {
+    if (!contentChanged && !ovChanged && !exChanged) {
       await refreshOne(wsId);
       return { ok: true, committed: false, reason: 'no-changes' };
     }
@@ -153,10 +173,25 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
         encoding: 'utf-8' });
       entries.push({ path: joinPath(P, 'audit/overrides.json'), mode: '100644', type: 'blob', sha: ovBlobSha });
     }
+    let exBlobSha = null;
+    if (exChanged) {
+      // Merge into the EXISTING committed config so hand-set keys (timeoutMs, …) survive.
+      let existing = null;
+      if (baseCommit) {
+        try {
+          const t = await client.getTree(baseCommit.treeSha);
+          const e = (t.tree || []).find((x) => x.type === 'blob' && x.path === joinPath(P, 'audit/config.json'));
+          if (e) existing = await client.getBlobJson(e.sha);
+        } catch { /* unreadable/absent → fresh file */ }
+      }
+      exBlobSha = await client.createBlob({
+        content: JSON.stringify(exemptIntoConfig(existing, exSer.exempt), null, 2) + '\n', encoding: 'utf-8' });
+      entries.push({ path: joinPath(P, 'audit/config.json'), mode: '100644', type: 'blob', sha: exBlobSha });
+    }
 
     const treeSha = await client.createTree({ baseTreeSha: baseCommit?.treeSha, entries });
     const commitSha = await client.createCommit({
-      message: message || (contentChanged ? defaultMessage(ser) : 'Update audit overrides'),
+      message: message || (contentChanged ? defaultMessage(ser) : 'Update audit settings'),
       treeSha, parents: ref ? [ref.sha] : [] });
 
     // GUARD 2 — force:false so a race between preflight and here is rejected (422 → ConflictError).
@@ -179,6 +214,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
       workspaceHash: ser.workspaceHash, files: filesMap,
     });
     if (ovChanged) await db.setSetting(OV_KEY(wsId), JSON.stringify({ sha: ovBlobSha, overrides: ovSer.overrides }));
+    if (exChanged) await db.setSetting(EX_KEY(wsId), JSON.stringify({ sha: exBlobSha, exempt: exSer.exempt }));
     clearConflict(wsId);
     await refreshOne(wsId);
     return { ok: true, committed: true, commitSha, changed: ser.changedCount, deleted: ser.deletedCount };
@@ -240,6 +276,13 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
         const res = await db.mergeAuditOverrides({ workspaceId: wsId, remote: om.overrides, base: om.base });
         await db.setSetting(OV_KEY(wsId), JSON.stringify({ sha: om.sha, overrides: res.normalized }));
       } catch (e) { console.warn('[sync] audit overrides merge skipped:', e?.message || e); }
+    }
+    if (context.exemptMerge) {
+      try {
+        const em = context.exemptMerge;
+        const res = await db.mergeExemptDomains({ remote: em.remote, base: em.base });
+        await db.setSetting(EX_KEY(wsId), JSON.stringify({ sha: em.sha, exempt: res.normalized }));
+      } catch (e) { console.warn('[sync] exempt merge skipped:', e?.message || e); }
     }
     clearConflict(wsId);
     await refreshOne(wsId);
@@ -326,6 +369,19 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
         }
       }
     }
+    // P5: exemptions travel too (audit/config.json) — same three-way, per domain, into the global list.
+    let exemptMerge = null;
+    {
+      const exSha = pathToSha.get(joinPath(P, 'audit/config.json')) || null;
+      const exState = await getExemptState(wsId);
+      if (exSha !== (exState?.sha ?? null)) {
+        if (!exSha) exemptMerge = { sha: null, remote: [], base: exState?.exempt || [] };
+        else {
+          try { const f = await client.getBlobJson(exSha); exemptMerge = { sha: exSha, remote: exemptFromConfig(f), base: exState?.exempt || [] }; }
+          catch (e) { console.warn('[sync] audit config skipped:', e?.message || e); }
+        }
+      }
+    }
 
     // Fetch ONLY changed pathway blobs; unchanged ones reuse the base hash (no refetch).
     const remoteObjs = {}, remoteHashes = {}, remoteBlobShas = {};
@@ -373,7 +429,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     const workspaceHash = await workspaceHashOf(manifestHash, remoteHashes);
     const filesMap = {};
     for (const id in remoteHashes) filesMap[id] = { contentHash: remoteHashes[id], blobSha: remoteBlobShas[id] };
-    const context = { wsId, plan, remoteObjs, remoteOrder, images, auditMerge, overridesMerge, commitSha: ref.sha, treeSha: commit.treeSha, filesMap, manifestHash, workspaceHash };
+    const context = { wsId, plan, remoteObjs, remoteOrder, images, auditMerge, overridesMerge, exemptMerge, commitSha: ref.sha, treeSha: commit.treeSha, filesMap, manifestHash, workspaceHash };
 
     if (plan.needsReview && interactive) {
       pendingPull.set(wsId, context);

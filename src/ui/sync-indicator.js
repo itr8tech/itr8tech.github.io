@@ -68,8 +68,8 @@ export function syncRow(ws, st, ctx) {
   row.append(syncChip(st, ws.id));
   if (!st.connected) return row;
 
-  // Audit-override changes (P5) justify a commit on their own — with zero content edits.
-  if (st.auditDirty) row.append(el('span', { class: 'muted sync-audit-pending', 'data-sync-audit-dirty': ws.id }, 'audit overrides pending'));
+  // Audit-side changes (P5: overrides + exemptions) justify a commit on their own — zero content edits.
+  if (st.auditDirty) row.append(el('span', { class: 'muted sync-audit-pending', 'data-sync-audit-dirty': ws.id }, 'audit changes pending'));
 
   const commitBtn = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-sync-commit': ws.id }, 'Commit…');
   commitBtn.disabled = st.remoteAhead || !(st.dirty || st.auditDirty || st.state === 'never-committed');
@@ -154,8 +154,8 @@ export function openCommitDialog(ws, st, invoker, ctx) {
   const n = st.uncommittedCount;
 
   const what = n > 0
-    ? `${n} change${n === 1 ? '' : 's'}${st.auditDirty ? ' + audit overrides' : ''}`
-    : (st.auditDirty ? 'Audit override changes' : `${n} changes`);
+    ? `${n} change${n === 1 ? '' : 's'}${st.auditDirty ? ' + audit changes' : ''}`
+    : (st.auditDirty ? 'Audit changes (overrides / exemptions)' : `${n} changes`);
   const form = el('form', { novalidate: true, 'aria-labelledby': 'commit-h' },
     el('h2', { id: 'commit-h', 'data-view-heading': true, tabindex: -1 }, `Commit — ${ws.org_label}`),
     el('p', { class: 'muted' }, `${what} to commit to ${ws.owner}/${ws.repo}.`),

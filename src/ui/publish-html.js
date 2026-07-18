@@ -91,7 +91,8 @@ export async function buildPathwayHtml(db, { id, attribution = false }) {
         el('div', { class: 'gear-menu' },
           el('button', { type: 'button', id: 'theme-btn' }, '🌗 Switch theme'),
           el('button', { type: 'button', id: 'save-progress' }, '💾 Save progress'),
-          el('button', { type: 'button', id: 'restore-progress' }, '↥ Restore progress'))),
+          el('button', { type: 'button', id: 'restore-progress' }, '↥ Restore progress'),
+          el('button', { type: 'button', id: 'dl-bookmarks', title: 'Download this pathway as a bookmarks file you can import into any browser — a folder per step' }, '🔖 Browser bookmarks'))),
       el('input', { type: 'file', id: 'restore-file', accept: 'application/json,.json', hidden: true })),
     el('p', { class: 'notice', id: 'storage-note', hidden: true },
       'Progress can’t be saved in this context — it will last for this session only. Use “Save progress” to keep a copy.'),
@@ -110,7 +111,8 @@ export async function buildPathwayHtml(db, { id, attribution = false }) {
       const safe = safeUrl(b.url);
       const label = hasBoth && (bi === 0 || !!grouped[bi - 1].required !== !!b.required)
         ? [el('h3', { class: 'bm-group-label' }, b.required ? 'Required' : 'Bonus')] : [];
-      return [...label, el('article', { class: `bm${b.required ? '' : ' bm--bonus'}`, 'data-bm-id': String(b.id), 'data-required': b.required ? '1' : '0' },
+      return [...label, el('article', { class: `bm${b.required ? '' : ' bm--bonus'}`, 'data-bm-id': String(b.id), 'data-required': b.required ? '1' : '0',
+        'data-added': b.added_at ? String(b.added_at) : null },
         el('details', {},
           el('summary', {},
             el('h3', {}, b.title || b.url),
@@ -382,6 +384,49 @@ const TRACKER_JS = String.raw`(function () {
     n.hidden = false; n.textContent = msg;
     setTimeout(function () { if (n.textContent === msg) { n.hidden = true; n.textContent = ''; } }, 6000);
   }
+
+  // ---- learner-side export: browser bookmarks (Netscape format), built FROM THE DOM at click
+  // time — titles/urls/steps are read from the page and escaped, so the static-script guarantee
+  // (no per-pathway data in the script) holds. Only http(s) launch links are included.
+  document.getElementById('dl-bookmarks').addEventListener('click', function () {
+    var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+    var L = [];
+    L.push('<!DOCTYPE NETSCAPE-Bookmark-file-1>');
+    L.push('<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">');
+    L.push('<TITLE>Bookmarks</TITLE>');
+    L.push('<H1>Bookmarks</H1>');
+    L.push('<DL><p>');
+    var h1 = document.querySelector('h1');
+    L.push('  <DT><H3>' + esc(h1 ? h1.textContent : 'Pathway') + '</H3>');
+    L.push('  <DL><p>');
+    var steps = document.querySelectorAll('.step');
+    for (var i = 0; i < steps.length; i++) {
+      var h2 = steps[i].querySelector('summary h2');
+      L.push('    <DT><H3>' + esc(h2 ? h2.textContent : 'Step') + '</H3>');
+      L.push('    <DL><p>');
+      var arts = steps[i].querySelectorAll('article[data-bm-id]');
+      for (var a = 0; a < arts.length; a++) {
+        var lnk = arts[a].querySelector('a.launch-btn');
+        if (!lnk) continue;
+        var href = lnk.getAttribute('href') || '';
+        if (!/^https?:/i.test(href)) continue;
+        var t = arts[a].querySelector('summary h3');
+        var added = Number(arts[a].getAttribute('data-added'));
+        var addAttr = isFinite(added) && added > 0 ? ' ADD_DATE="' + Math.floor(added / 1000) + '"' : '';
+        L.push('      <DT><A HREF="' + esc(href) + '"' + addAttr + '>' + esc(t ? t.textContent : href) + '</A>');
+      }
+      L.push('    </DL><p>');
+    }
+    L.push('  </DL><p>');
+    L.push('</DL><p>');
+    var blob = new Blob([L.join('\n') + '\n'], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    var a4 = document.createElement('a');
+    a4.href = url; a4.download = SLUG + '--bookmarks.html';
+    document.body.appendChild(a4); a4.click(); a4.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    notify('Bookmarks file downloaded — import it from your browser’s bookmark manager.');
+  });
 
   // ---- expand / collapse / search ----
   function setAll(open) {

@@ -4,17 +4,27 @@ import * as theme from './theme.js';
 import { announce } from './a11y.js';
 
 let banner, outlet, toggle;
+// The toggle names the mode you'd SWITCH TO (in dark mode it offers "Light mode"), with a sun/moon
+// glyph. Because the label flips to describe the action, it is NOT an aria-pressed toggle — the
+// accessible name itself carries the state.
+function paintThemeToggle() {
+  const dark = theme.current() === 'dark';
+  toggle.replaceChildren(
+    el('span', { class: 'theme-toggle__icon', 'aria-hidden': 'true' }, dark ? '☀️' : '🌙'),
+    el('span', { class: 'theme-toggle__label' }, dark ? 'Light mode' : 'Dark mode'));
+}
 export function init() {
   banner = document.getElementById('role-banner');
   outlet = document.getElementById('view');
   toggle = document.getElementById('theme-toggle');
-  toggle.setAttribute('aria-pressed', String(theme.current() === 'dark'));
+  toggle.removeAttribute('aria-pressed');
+  paintThemeToggle();
   toggle.addEventListener('click', () => {
     const t = theme.toggle();
-    toggle.setAttribute('aria-pressed', String(t === 'dark'));
-    announce(t === 'dark' ? 'Dark mode on' : 'Dark mode off');
+    paintThemeToggle();
+    announce(t === 'dark' ? 'Dark mode on' : 'Light mode on');
   });
-  return { setRole, setBusy, announce, skeleton, errorPane, capabilityScreen };
+  return { setRole, setBusy, announce, skeleton, errorPane, capabilityScreen, paintThemeToggle };
 }
 export function setRole(role, isPrimary) {
   document.body.dataset.role = role;                 // ONE role location: body[data-role]

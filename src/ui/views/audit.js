@@ -4,7 +4,7 @@
 // link; "Auto" hands it back to the auditor now. Soft overrides EXPIRE so a link that dies later is
 // eventually re-flagged; pinned ones never do (mergeAuditResults enforces both). Overrides commit to
 // audit/overrides.json, so they travel between devices and the audit workflow skips them.
-import { el, clear } from '../dom.js';
+import { el, clear, ttButton as ttButtonBase } from '../dom.js';
 import { confirmDelete } from '../editors.js';
 
 function relTime(ts) {
@@ -49,15 +49,10 @@ export default async function mount(container, params, ctx) {
   container.append(root);
   const controller = { title: 'Link audit', refresh, destroy() {} };
   const openState = {};   // section key → open? — survives refresh() re-renders after each action
-  let tipSeq = 0;
   const act = async (fn) => { try { await fn(); } catch (e) { ctx.announce(e.message || 'Action failed.', { assertive: true }); } };
 
-  function ttButton(label, tip, fn) {
-    const id = `audit-tt-${++tipSeq}`;
-    const b = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'aria-describedby': id }, label);
-    b.addEventListener('click', fn);
-    return el('span', { class: 'tt-wrap' }, b, el('span', { class: 'tt', role: 'tooltip', id }, tip));
-  }
+  const ttButton = (label, tip, fn) =>
+    ttButtonBase(label, tip, { class: 'btn btn--sm', 'data-requires-primary': true }, fn);
 
   function extLink(href, text) {
     return el('a', { class: 'audit-row__url', href, target: '_blank', rel: 'noopener noreferrer nofollow ugc' }, text);

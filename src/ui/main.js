@@ -92,6 +92,7 @@ async function boot() {
   shell.setRole(r.role, r.isPrimary);
   applyReadOnly(document.body, !r.isPrimary);
   await theme.reconcile();
+  shell.paintThemeToggle();               // reconcile may have flipped the theme → repaint sun/moon
 
   // NO production seed: an empty database boots empty; content arrives by creating a workspace or
   // connecting a repo and pulling. The converted fixture under /seed is TEST-ONLY — specs opt in by

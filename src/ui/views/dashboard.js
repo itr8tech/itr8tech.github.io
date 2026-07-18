@@ -1,5 +1,5 @@
 // src/ui/views/dashboard.js — pathways grouped by workspace.
-import { el, clear } from '../dom.js';
+import { el, clear, ttButton } from '../dom.js';
 import { openPathwayEditor, openWorkspaceEditor, confirmDelete } from '../editors.js';
 import { openConnectRepo } from '../connect.js';
 import { syncRow } from '../sync-indicator.js';
@@ -64,22 +64,32 @@ export default async function mount(container, params, ctx) {
       const section = el('section', { class: 'workspace', 'aria-labelledby': `ws-${ws.id}`,
         style: ws.colour ? `--org-accent:${ws.colour}` : null });
       const connected = !!(ws.owner && ws.repo);
+      // Connection state renders ONCE: connected → the owner/repo chip (+ sync row below);
+      // not connected → a single positive "Connect to GitHub…" button, no warning chips.
       const wsHeader = el('header', {}, el('h2', { id: `ws-${ws.id}` }, `${ws.org_label} `,
         el('span', { class: 'muted' }, `(${ws.pathway_count})`)),
-        el('span', { class: `ws-conn ${connected ? 'is-connected' : 'is-disconnected'}` },
-          connected ? `${ws.owner}/${ws.repo}` : 'Not connected'));
+        connected ? el('span', { class: 'ws-conn is-connected' }, `${ws.owner}/${ws.repo}`) : '');
+      // Icon toolbar with instant tooltips (same .tt pattern as #/audit; 'end'-aligned so the
+      // tips stay on-screen at the right edge).
       if (primary) wsHeader.append(el('span', { class: 'row', style: 'margin-left:auto' },
-        btn('⬇', { class: 'btn btn--icon', 'aria-label': `Export workspace ${ws.org_label} to a file` },
-          (ev) => doExport('workspace', ws.id, ev.currentTarget)),
-        btn('⚙', { class: 'btn btn--icon', 'aria-label': `Repository and sync settings for ${ws.org_label}`, 'data-requires-primary': true },
-          (ev) => openConnectRepo({ workspace: ws, invoker: ev.currentTarget, ctx })),
-        btn('✎', { class: 'btn btn--icon', 'aria-label': `Rename workspace ${ws.org_label}`, 'data-requires-primary': true },
-          (ev) => openWorkspaceEditor({ workspace: ws, invoker: ev.currentTarget, ctx })),
-        btn('🗑', { class: 'btn btn--icon btn--danger', 'aria-label': `Delete workspace ${ws.org_label}`, 'data-requires-primary': true },
+        ttButton('⬇', 'Export this workspace to a file — every pathway with its images, ready to email or keep as a backup.',
+          { class: 'btn btn--icon', 'aria-label': `Export workspace ${ws.org_label} to a file` },
+          (ev) => doExport('workspace', ws.id, ev.currentTarget), 'end'),
+        connected ? ttButton('⚙', 'Repository & sync settings — change the connected repo, branch, token, or disconnect.',
+          { class: 'btn btn--icon', 'aria-label': `Repository and sync settings for ${ws.org_label}`, 'data-requires-primary': true },
+          (ev) => openConnectRepo({ workspace: ws, invoker: ev.currentTarget, ctx }), 'end') : '',
+        ttButton('✎', 'Rename this workspace and set its accent colour.',
+          { class: 'btn btn--icon', 'aria-label': `Rename workspace ${ws.org_label}`, 'data-requires-primary': true },
+          (ev) => openWorkspaceEditor({ workspace: ws, invoker: ev.currentTarget, ctx }), 'end'),
+        ttButton('🗑', 'Delete this workspace and all its pathways from this device. A connected repository is not touched.',
+          { class: 'btn btn--icon btn--danger', 'aria-label': `Delete workspace ${ws.org_label}`, 'data-requires-primary': true },
           (ev) => confirmDelete({ noun: 'workspace', name: `${ws.org_label} (${ws.pathway_count} ${ws.pathway_count === 1 ? 'pathway' : 'pathways'})`,
-            invoker: ev.currentTarget, onConfirm: () => ctx.db.deleteWorkspace({ id: ws.id }) }))));
+            invoker: ev.currentTarget, onConfirm: () => ctx.db.deleteWorkspace({ id: ws.id }) }), 'end')));
       section.append(wsHeader);
-      if (primary && statuses[ws.id]) section.append(syncRow(ws, statuses[ws.id], ctx));
+      if (primary && connected && statuses[ws.id]) section.append(syncRow(ws, statuses[ws.id], ctx));
+      else if (primary && !connected) section.append(el('div', { class: 'sync-row' },
+        btn('Connect to GitHub…', { class: 'btn btn--sm', 'data-requires-primary': true, 'data-connect-ws': ws.id },
+          (ev) => openConnectRepo({ workspace: ws, invoker: ev.currentTarget, ctx }))));
       const list = el('ul', { class: 'card-grid', 'data-reorder-scope': 'pathway', role: 'list' });
       items.forEach((p, idx) => {
         const cell = el('li', { class: 'card-cell', 'data-id': p.id, 'data-focus-key': `pathway-card:${p.id}` },

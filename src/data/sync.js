@@ -442,8 +442,36 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     // Our own commit moved the remote; advance the sync baseline so the user's next commit doesn't
     // trip the remote-ahead guard on a change we made ourselves. (Pathway files are untouched.)
     if (result.commitSha) { try { await pull(wsId, { interactive: false }); } catch { /* best-effort */ } }
+    // Kick off the first audit run right away (also on update-clicks — a fresh run after upgrading
+    // the checker is what you want). GitHub can lag indexing a just-committed workflow → one retry.
+    // Best-effort: dispatch needs its own token permission (Actions: write); failure isn't fatal.
+    if (!result.workflowSkipped) {
+      result.dispatched = false;
+      for (let attempt = 0; attempt < 2 && !result.dispatched; attempt++) {
+        try { await client.dispatchWorkflow({ file: 'audit.yml' }); result.dispatched = true; }
+        catch { if (!attempt) await new Promise((res) => setTimeout(res, 2000)); }
+      }
+    }
     await refreshOne(wsId);
     return { ok: true, ...result };
+  }
+
+  // Truthful tooling status for the #/audit section — probed from the repo, so it's correct across
+  // devices and re-renders: is the workflow committed, are the scripts there, has a results file
+  // ever been produced ("waiting on the first audit" vs "active")?
+  async function auditToolingStatus(wsId) {
+    const ws = await db.getWorkspace(wsId);
+    if (!ws || !ws.owner || !ws.repo) throw new Error('This workspace is not connected to a repo.');
+    const token = await db.getWorkspacePat(wsId);
+    if (!token) throw new Error('No access token is stored for this workspace.');
+    const client = makeClient(ws, token);
+    const br = ws.branch || 'main';
+    const [wf, scripts, results] = await Promise.all([
+      client.headFile(ws.owner, ws.repo, '.github/workflows/audit.yml', br),
+      client.headFile(ws.owner, ws.repo, 'audit/audit.mjs', br),
+      client.headFile(ws.owner, ws.repo, joinPath(ws.path || '', 'audit/results.json'), br),
+    ]);
+    return { ok: true, workflow: wf.exists, scripts: scripts.exists, hasResults: results.exists };
   }
 
   // P6: import the legacy curator-pathways.json into this (connected, otherwise-empty) workspace.
@@ -573,7 +601,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     init: () => refreshAll(),
     refreshOne, refreshAll,
     handleChange: (evt) => { if (!evt || evt.entity === '*' || ['pathways', 'steps', 'bookmarks', 'workspaces', 'sync'].includes(evt.entity)) refreshAll(); },
-    commit, initialize, pull, resolvePull, importLegacy, installAuditTooling,
+    commit, initialize, pull, resolvePull, importLegacy, installAuditTooling, auditToolingStatus,
     fetchCommittedPathways, discardLocalChanges,
     getPendingPull: (wsId) => pendingPull.get(wsId) || null,
     getAutoCommit, setAutoCommit, startTimers, stopTimers,

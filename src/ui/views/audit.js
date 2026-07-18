@@ -94,29 +94,38 @@ export default async function mount(container, params, ctx) {
     for (const d of root.querySelectorAll('details.audit-section')) d.open = open;   // toggle handlers record openState
   };
 
-  // Install/update the GitHub Action tooling into each connected repo. No status probe on render
-  // (that would cost a network round-trip per workspace) — the install itself is idempotent and
-  // reports "already up to date".
+  // Install/update the GitHub Action tooling into each connected repo. Status is PROBED from the
+  // repo (async, after paint), so it survives re-renders and is truthful across devices: not
+  // installed → installed-waiting-on-first-run → active (results committed).
+  const statusText = (s) => !s.workflow && !s.scripts ? 'not installed'
+    : s.workflow && s.hasResults ? 'active — audit results committed ✓'
+    : s.workflow ? 'installed — waiting for the first audit run'
+    : 'scripts only — workflow file missing (the token needs the “Workflows” permission)';
   async function renderWorkflowSection() {
     const workspaces = (await ctx.db.getWorkspaces()).filter((w) => w.owner && w.repo);
     if (!workspaces.length) return null;
     const sec = el('section', { class: 'exempt-section', 'aria-labelledby': 'auditwf-h' });
     sec.append(el('h2', { id: 'auditwf-h' }, 'Audit workflow'),
-      el('p', { class: 'muted' }, 'The GitHub Action that checks every link weekly and commits audit/results.json for the app to merge. “Install / update” commits the checker scripts and the workflow file into the repository (idempotent — re-run it after app updates to refresh them).'));
+      el('p', { class: 'muted' }, 'The GitHub Action that checks every link weekly and commits audit/results.json for the app to merge on pull. “Install / update” commits the checker scripts + workflow into the repository and starts the first run (idempotent — re-run it after app updates to refresh them).'));
     const list = el('ul', { class: 'exempt-list', role: 'list' });
     for (const w of workspaces) {
-      const status = el('span', { class: 'muted', role: 'status' });
+      const status = el('span', { class: 'muted', role: 'status' }, 'checking…');
+      const probe = () => ctx.sync.auditToolingStatus(w.id)
+        .then((s) => { status.textContent = statusText(s); })
+        .catch(() => { status.textContent = 'status unavailable'; });
       const install = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-audit-install': w.id, style: 'margin-inline-start:auto' }, 'Install / update');
       install.addEventListener('click', async () => {
         install.disabled = true; status.textContent = 'installing…';
         try {
           const r = await ctx.sync.installAuditTooling(w.id);
-          status.textContent = r.upToDate ? 'already up to date ✓'
-            : r.workflowSkipped ? 'scripts installed — the token can’t write workflow files; grant it the “Workflows” permission and re-run, or add .github/workflows/audit.yml by hand'
-            : 'installed ✓';
+          status.textContent = r.workflowSkipped
+            ? 'scripts installed — the token can’t write workflow files; grant it the “Workflows” permission and re-run, or add .github/workflows/audit.yml by hand'
+            : r.dispatched ? 'installed — first audit run started; results arrive on a future pull ✓'
+            : 'installed — couldn’t start the run (token may need “Actions” permission); trigger it from the repo’s Actions tab';
         } catch (e) { status.textContent = e.message || 'Could not install.'; }
         finally { install.disabled = false; }
       });
+      probe();                                             // async fill-in; render doesn't block on it
       list.append(el('li', {}, el('code', {}, `${w.owner}/${w.repo}`), el('span', { class: 'muted' }, ` — ${w.org_label} `), install, status));
     }
     sec.append(list);

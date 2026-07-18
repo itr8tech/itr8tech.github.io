@@ -85,6 +85,8 @@ export function createGitHubClient({
       .then((b) => JSON.parse(new TextDecoder().decode(b64ToBytes(b.content)))),
 
     // ---- git data (write) ----
+    // Trigger a workflow_dispatch run (204, empty body). Fine-grained PATs need Actions: write.
+    dispatchWorkflow: ({ file = 'audit.yml' } = {}) => api('POST', `/actions/workflows/${enc(file)}/dispatches`, { ref: branch }).then(() => true),
     createBlob: ({ content, encoding = 'utf-8' }) => api('POST', '/git/blobs', { content, encoding }).then((b) => b.sha),
     createTree: ({ baseTreeSha, entries }) => api('POST', '/git/trees',
       baseTreeSha ? { base_tree: baseTreeSha, tree: entries } : { tree: entries }).then((t) => t.sha),

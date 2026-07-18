@@ -103,9 +103,14 @@ export async function buildPathwayHtml(db, { id, attribution = false }) {
   // own card so entries don't bleed together.
   const stepsWrap = el('main', { id: 'steps' });
   (p.steps || []).forEach((s, i) => {
-    const articles = (s.bookmarks || []).map((b) => {
+    // Required links grouped first; bonus in their own subtly-distinct section (dashed cards).
+    const grouped = [...(s.bookmarks || []).filter((b) => b.required), ...(s.bookmarks || []).filter((b) => !b.required)];
+    const hasBoth = grouped.length && grouped.some((b) => b.required) && grouped.some((b) => !b.required);
+    const articles = grouped.flatMap((b, bi) => {
       const safe = safeUrl(b.url);
-      return el('article', { class: 'bm', 'data-bm-id': String(b.id), 'data-required': b.required ? '1' : '0' },
+      const label = hasBoth && (bi === 0 || !!grouped[bi - 1].required !== !!b.required)
+        ? [el('h3', { class: 'bm-group-label' }, b.required ? 'Required' : 'Bonus')] : [];
+      return [...label, el('article', { class: `bm${b.required ? '' : ' bm--bonus'}`, 'data-bm-id': String(b.id), 'data-required': b.required ? '1' : '0' },
         el('details', {},
           el('summary', {},
             el('h3', {}, b.title || b.url),
@@ -120,7 +125,7 @@ export async function buildPathwayHtml(db, { id, attribution = false }) {
             el('p', { class: 'bm-actions' },
               safe ? el('a', { class: 'launch-btn', href: safe, target: '_blank', rel: 'noopener noreferrer', 'data-bm-id': String(b.id) }, 'Launch ↗')
                 : el('span', { class: 'bm-nolink' }, `${b.url} (link unavailable)`),
-              el('button', { type: 'button', class: 'mark-done', 'data-bm-id': String(b.id) }, 'mark as done')))));
+              el('button', { type: 'button', class: 'mark-done', 'data-bm-id': String(b.id) }, 'mark as done')))))];
     });
     stepsWrap.append(el('section', { class: 'step' },
       el('details', {},
@@ -193,6 +198,8 @@ button:hover{border-color:var(--accent)}
 .step-summary{font-size:.85rem}
 .step-objective{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:.5rem}
 .bm{border:1px solid var(--border);border-radius:10px;background:var(--bg);margin:.6rem 0;overflow:hidden}
+.bm--bonus{border-style:dashed}
+.bm-group-label{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:.9rem 0 .25rem}
 .bm>details{padding:.15rem .8rem}
 .bm summary{cursor:pointer;display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;padding:.45rem 0}
 .bm summary h3{display:inline;margin:0}

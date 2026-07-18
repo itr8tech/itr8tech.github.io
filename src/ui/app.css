@@ -196,6 +196,12 @@
   .tt-wrap--end .tt{ left:auto; right:0; }   /* right-edge toolbars: keep the tip on-screen */
   .theme-toggle__icon{ font-size:1.05rem; line-height:1; }
   @media (prefers-reduced-motion:reduce){ .tt{ transition:none; } }
+  /* P7: required/bonus grouping — subtle: a small-caps label + solid vs dashed left rule */
+  .bm-group-label{ font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--muted); margin:var(--space-3) 0 var(--space-1); }
+  .bookmarks--required > .bookmark{ border-inline-start:3px solid var(--border-strong); padding-inline-start:var(--space-3); }
+  .bookmarks--bonus > .bookmark{ border-inline-start:3px dashed var(--border); padding-inline-start:var(--space-3); }
+
   /* P6 import dialog */
   .import-dialog{ width:min(46rem, 92vw); }
   .dashboard-actions{ display:flex; flex-wrap:wrap; gap:var(--space-2); margin:var(--space-3) 0; }
@@ -211,8 +217,8 @@
   .import-bulk{ display:flex; gap:var(--space-2); margin-top:var(--space-2); }
   .import-warnings{ margin:var(--space-2) 0 0; padding-inline-start:1.2em; font-size:.9rem; color:var(--muted); }
 
-  /* service-worker "new version" notice */
-  .update-notice{ position:fixed; inset-inline:0; bottom:var(--space-4); margin-inline:auto; width:max-content; max-width:90vw;
+  /* transient visible notices: SW "new version" + action toasts (pull/commit results) */
+  .update-notice,.toast{ position:fixed; inset-inline:0; bottom:var(--space-4); margin-inline:auto; width:max-content; max-width:90vw;
     display:flex; align-items:center; gap:var(--space-3); padding:var(--space-3) var(--space-4); z-index:var(--z-dialog);
     background:var(--surface); color:var(--text); border:1px solid var(--border-strong); border-radius:var(--radius-lg); box-shadow:var(--shadow-1,0 4px 16px rgba(0,0,0,.3)); }
 

@@ -4,6 +4,7 @@
 import { el } from './dom.js';
 import { summarizeDiff } from './pathway-diff.js';
 import { announce } from './a11y.js';
+import { toast } from './toast.js';
 
 const CHIP = {
   clean: { text: () => 'In sync', cls: 'ok' },
@@ -14,18 +15,23 @@ const CHIP = {
   error: { text: () => 'Sync error', cls: 'danger' },
 };
 
-export async function doPull(ws, ctx) {
+// VISIBLE feedback (toast + busy button): announce() alone feeds only the hidden live region, which
+// made a successful Pull look like nothing happened.
+export async function doPull(ws, ctx, invoker = null) {
+  const prevText = invoker?.textContent;
+  if (invoker) { invoker.disabled = true; invoker.textContent = 'Pulling…'; }
   try {
     const res = await ctx.sync.pull(ws.id);
-    if (res.needsReview) { ctx.navigate(`/merge/${encodeURIComponent(ws.id)}`); return; }
+    if (res.needsReview) { toast(`${ws.org_label}: changes need review.`); ctx.navigate(`/merge/${encodeURIComponent(ws.id)}`); return; }
     if (res.legacy) { offerLegacyImport(ws, ctx); return; }         // P6: unmigrated legacy repo
     if (res.ok === false && res.reason === 'no-manifest') {
-      announce('This repository has no PathCurator content yet — your first Commit will initialize it.', { assertive: true });
+      toast('This repository has no PathCurator content yet — your first Commit will initialize it.');
       return;
     }
-    if (res.upToDate) announce('Already up to date.');
-    else announce(`Pulled: ${res.applied.added} added, ${res.applied.replaced} updated, ${res.applied.deleted} removed.`);
-  } catch (e) { announce(e.message || 'Could not pull.', { assertive: true }); }
+    if (res.upToDate) toast(`${ws.org_label}: already up to date ✓`);
+    else toast(`${ws.org_label}: pulled — ${res.applied.added} added, ${res.applied.replaced} updated, ${res.applied.deleted} removed.`);
+  } catch (e) { toast(e.message || 'Could not pull.'); }
+  finally { if (invoker?.isConnected) { invoker.disabled = false; invoker.textContent = prevText; } }
 }
 
 // P6: the repo stores its pathways in the legacy single-file format — offer to import them.
@@ -80,7 +86,7 @@ export function syncRow(ws, st, ctx) {
   if (st.state !== 'dirty') reviewBtn.hidden = true;   // review/discard needs a committed baseline
 
   const pullBtn = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-sync-pull': ws.id }, st.remoteAhead ? 'Pull & review' : 'Pull');
-  pullBtn.addEventListener('click', () => doPull(ws, ctx));
+  pullBtn.addEventListener('click', (ev) => doPull(ws, ctx, ev.currentTarget));
 
   const auto = el('label', { class: 'sync-auto' }, el('input', { type: 'checkbox', 'data-sync-auto': ws.id }), ' Auto-commit');
   const autoInput = auto.querySelector('input');
@@ -171,8 +177,8 @@ export function openCommitDialog(ws, st, invoker, ctx) {
     submit.disabled = true; dlg.setAttribute('aria-busy', 'true');
     try {
       const res = await ctx.sync.commit(ws.id, { message: msg.value.trim() || undefined });
-      if (res.ok && res.committed) { announce('Changes committed.'); dlg.close('ok'); }
-      else if (res.reason === 'no-changes') { announce('Nothing to commit.'); dlg.close('ok'); }
+      if (res.ok && res.committed) { toast(`${ws.org_label}: committed ✓`); dlg.close('ok'); }
+      else if (res.reason === 'no-changes') { toast('Nothing to commit.'); dlg.close('ok'); }
       else if (res.reason === 'remote-ahead') {
         err.textContent = 'Someone else has pushed changes since your last sync. Pull and review before committing.';
         submit.hidden = true; reviewBtn.hidden = false; reviewBtn.focus();

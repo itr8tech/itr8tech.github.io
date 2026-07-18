@@ -144,9 +144,18 @@ export default async function mount(container, params, ctx) {
     const body = el('div', { class: 'step__body', id: bodyId });
     if (on) body.hidden = true;
     if (s.objective) body.append(md(s.objective));
-    const bl = el('ul', { class: 'bookmarks', 'data-reorder-scope': 'bookmark', 'data-parent': s.id, role: 'list' });
-    s.bookmarks.forEach((b, bi) => bl.append(renderBookmark(b, bi, n, s.id)));
-    body.append(bl, btn('+ Link', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': `add-link:${s.id}` },
+    // Required links first, bonus in their own subtly-distinct section. Reordering is scoped
+    // per group (moveEntity places bookmarks within their required-group).
+    const required = s.bookmarks.filter((b) => b.required);
+    const bonus = s.bookmarks.filter((b) => !b.required);
+    for (const [items, key, label] of [[required, 'required', 'Required'], [bonus, 'bonus', 'Bonus']]) {
+      if (!items.length) continue;
+      if (required.length && bonus.length) body.append(el('h3', { class: 'bm-group-label' }, label));
+      const bl = el('ul', { class: `bookmarks bookmarks--${key}`, 'data-reorder-scope': 'bookmark', 'data-parent': s.id, role: 'list' });
+      items.forEach((b, bi) => bl.append(renderBookmark(b, bi, items.length, s.id)));
+      body.append(bl);
+    }
+    body.append(btn('+ Link', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': `add-link:${s.id}` },
       (ev) => openBookmarkEditor({ stepId: s.id, invoker: ev.currentTarget, ctx })));
     if (s.pause_and_reflect) body.append(el('div', { class: 'pause-reflect' }, el('span', { class: 'callout-label' }, 'Pause & reflect'), md(s.pause_and_reflect)));
     li.append(header, body);

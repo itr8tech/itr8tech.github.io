@@ -362,10 +362,25 @@ function moveEntity({ entity, id, toParentId = null, toIndex = 0 }) {
       db.exec({ sql: `UPDATE ${cfg.table} SET ${cfg.parentCol}=?, sort_order=? WHERE id=?`, bind: [toParent, PARK, id] });
     }
 
-    const dest = siblingIds(cfg, toParent).filter((x) => x !== id);
-    const idx = Math.max(0, Math.min(Number(toIndex) || 0, dest.length));
-    dest.splice(idx, 0, id);
-    renumber(cfg.table, dest);
+    if (entity === 'bookmark') {
+      // Bookmarks are GROUPED required-first (in the app UI and the published page), so a move
+      // happens WITHIN the mover's group: toIndex is its position among same-required siblings.
+      // Rebuilding as [required…, bonus…] also self-heals interleaved legacy/imported ordering
+      // the first time anything in the step is moved.
+      const req = db.selectValue('SELECT required FROM bookmarks WHERE id=?', [id]);
+      const rows = db.selectObjects(
+        'SELECT id, required FROM bookmarks WHERE step_id=? AND id IS NOT ? ORDER BY sort_order', [toParent, id]);
+      const same = rows.filter((r) => r.required === req).map((r) => r.id);
+      const other = rows.filter((r) => r.required !== req).map((r) => r.id);
+      const idx = Math.max(0, Math.min(Number(toIndex) || 0, same.length));
+      same.splice(idx, 0, id);
+      renumber(cfg.table, req ? [...same, ...other] : [...other, ...same]);
+    } else {
+      const dest = siblingIds(cfg, toParent).filter((x) => x !== id);
+      const idx = Math.max(0, Math.min(Number(toIndex) || 0, dest.length));
+      dest.splice(idx, 0, id);
+      renumber(cfg.table, dest);
+    }
     if (toParent !== fromParent) renumber(cfg.table, siblingIds(cfg, fromParent));
 
     if (entity === 'step') touchPathway(fromParent);

@@ -138,12 +138,5 @@ export async function openImportDialog({ file, invoker, ctx }) {
   });
 }
 
-// Shared download helper (Blob + a[download]; CSP-clean, no server).
-export function downloadFile(filename, content) {
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-  const a = el('a', { href: url, download: filename });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
+// downloadFile moved to src/ui/download.js (P7) — re-exported for existing callers.
+export { downloadFile } from './download.js';

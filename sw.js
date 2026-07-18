@@ -13,7 +13,7 @@ const PRECACHE = [
   // ui modules
   '/src/ui/a11y.js', '/src/ui/attachments.js', '/src/ui/connect.js', '/src/ui/dom.js', '/src/ui/editors.js',
   '/src/ui/main.js', '/src/ui/markdown.js', '/src/ui/reorder.js', '/src/ui/router.js', '/src/ui/shell.js',
-  '/src/ui/sync-indicator.js', '/src/ui/theme.js', '/src/ui/theme-guard.js', '/src/ui/inbox-badge.js', '/src/ui/inbox-triage.js', '/src/ui/pathway-diff.js', '/src/ui/import-dialog.js',
+  '/src/ui/sync-indicator.js', '/src/ui/theme.js', '/src/ui/theme-guard.js', '/src/ui/inbox-badge.js', '/src/ui/inbox-triage.js', '/src/ui/pathway-diff.js', '/src/ui/import-dialog.js', '/src/ui/download.js', '/src/ui/publish-html.js',
   // route/dialog modules (dynamically imported → precache explicitly)
   '/src/ui/views/dashboard.js', '/src/ui/views/merge.js', '/src/ui/views/notfound.js',
   '/src/ui/views/pathway.js', '/src/ui/views/sync.js', '/src/ui/views/inbox.js', '/src/ui/views/audit.js',

@@ -27,7 +27,7 @@ export function bytesFromB64(b64) {
   return u;
 }
 
-const slugify = (s) => String(s || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'export';
+export const slugify = (s) => String(s || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'export';
 const today = () => new Date().toISOString().slice(0, 10);
 const imagesOut = (images) => Object.fromEntries(Object.entries(images || {}).map(([sha, i]) =>
   [sha, { dataBase64: b64FromBytes(i.bytes instanceof Uint8Array ? i.bytes : new Uint8Array(i.bytes)), mime: i.mime, ext: i.ext }]));

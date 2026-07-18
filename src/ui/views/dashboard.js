@@ -4,7 +4,8 @@ import { openPathwayEditor, openWorkspaceEditor, confirmDelete } from '../editor
 import { openConnectRepo } from '../connect.js';
 import { syncRow } from '../sync-indicator.js';
 import { initReorder, reorderControls } from '../reorder.js';
-import { openImportDialog, downloadFile } from '../import-dialog.js';
+import { openImportDialog } from '../import-dialog.js';
+import { downloadFile } from '../download.js';
 import { buildExportFile } from '/src/data/exchange.js';
 export default async function mount(container, params, ctx) {
   const root = el('div', { class: 'view-content' }); container.append(root);

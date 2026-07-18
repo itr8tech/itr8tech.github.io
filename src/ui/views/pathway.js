@@ -97,13 +97,23 @@ export default async function mount(container, params, ctx) {
           onConfirm: async () => { await ctx.db.deletePathway({ id: p.id }); ctx.navigate('#/'); } })),
       btn('+ Step', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': `add-step:${p.id}` },
         (ev) => openStepEditor({ pathwayId: p.id, invoker: ev.currentTarget, ctx })),
-      // P6: read-shaped → usable from a follower tab too
-      btn('⬇ Export', { class: 'btn', 'data-focus-key': `export-pathway:${p.id}` }, async () => {
+      // P6/P7 exports: read-shaped → usable from a follower tab too
+      btn('⬇ Export file', { class: 'btn', 'data-focus-key': `export-pathway:${p.id}` }, async () => {
         try {
           const { buildExportFile } = await import('/src/data/exchange.js');
-          const { downloadFile } = await import('../import-dialog.js');
+          const { downloadFile } = await import('../download.js');
           const { filename, content } = await buildExportFile(ctx.db, { scope: 'pathway', id: p.id });
           downloadFile(filename, content);
+          ctx.announce(`Exported ${filename}.`);
+        } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
+      }),
+      btn('🌐 Export web page', { class: 'btn', 'data-focus-key': `export-web:${p.id}`,
+        title: 'A self-contained interactive page for learners — tracks launch progress in their browser' }, async () => {
+        try {
+          const { buildPathwayHtml } = await import('../publish-html.js');
+          const { downloadFile } = await import('../download.js');
+          const { filename, content } = await buildPathwayHtml(ctx.db, { id: p.id });
+          downloadFile(filename, content, 'text/html;charset=utf-8');
           ctx.announce(`Exported ${filename}.`);
         } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
       })));

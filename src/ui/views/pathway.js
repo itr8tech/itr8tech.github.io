@@ -108,15 +108,8 @@ export default async function mount(container, params, ctx) {
         } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
       }),
       btn('🌐 Export web page', { class: 'btn', 'data-focus-key': `export-web:${p.id}`,
-        title: 'A self-contained interactive page for learners — tracks launch progress in their browser' }, async () => {
-        try {
-          const { buildPathwayHtml } = await import('../publish-html.js');
-          const { downloadFile } = await import('../download.js');
-          const { filename, content } = await buildPathwayHtml(ctx.db, { id: p.id });
-          downloadFile(filename, content, 'text/html;charset=utf-8');
-          ctx.announce(`Exported ${filename}.`);
-        } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
-      })));
+        title: 'A self-contained interactive page for learners — tracks launch progress in their browser' },
+        (ev) => openWebExportDialog({ pathway: p, invoker: ev.currentTarget, ctx }))));
 
     if (p.steps.length) root.append(el('div', { class: 'steps-toolbar' },
       el('button', { type: 'button', class: 'btn btn--subtle', 'data-collapse-all': 'collapse' }, 'Collapse all')));
@@ -182,4 +175,42 @@ export default async function mount(container, params, ctx) {
 
   await refresh();
   return controller;
+}
+
+// P7: web-page export dialog. Attribution (author name) is OFF by default and remembered as a
+// setting; richer attribution (bio, author link, several fields) is a recorded TODO for later.
+async function openWebExportDialog({ pathway: p, invoker, ctx }) {
+  const { el } = await import('../dom.js');
+  const saved = (await ctx.db.getSetting('publish_attribution')) === '1';
+  const dlg = el('dialog', { class: 'pc-editor' });
+  const cb = el('input', { type: 'checkbox', name: 'attribution', checked: saved });
+  const err = el('p', { class: 'field-error', role: 'alert' });
+  const submit = el('button', { type: 'submit', class: 'btn btn--primary' }, 'Export');
+  const form = el('form', { novalidate: true, 'aria-labelledby': 'webx-h' },
+    el('h2', { id: 'webx-h', 'data-view-heading': true, tabindex: -1 }, 'Export web page'),
+    el('p', { class: 'muted' }, 'A single self-contained HTML file for learners — works offline and tracks their launch progress in their own browser.'),
+    el('label', { class: 'field-label', style: 'display:flex;gap:.5rem;align-items:center;font-weight:400' }, cb,
+      ' Include author attribution (your name in the byline)'),
+    err,
+    el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Cancel'), submit));
+  form.querySelector('.form-actions .btn').addEventListener('click', () => dlg.close('cancel'));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); err.textContent = '';
+    submit.disabled = true; dlg.setAttribute('aria-busy', 'true');
+    try {
+      if (ctx.isPrimary()) await ctx.db.setSetting('publish_attribution', cb.checked ? '1' : '0').catch(() => {});
+      const { buildPathwayHtml } = await import('../publish-html.js');
+      const { downloadFile } = await import('../download.js');
+      const { filename, content } = await buildPathwayHtml(ctx.db, { id: p.id, attribution: cb.checked });
+      downloadFile(filename, content, 'text/html;charset=utf-8');
+      ctx.announce(`Exported ${filename}.`);
+      dlg.close('ok');
+    } catch (ex) { err.textContent = ex.message || 'Export failed.'; submit.disabled = false; }
+    finally { dlg.removeAttribute('aria-busy'); }
+  });
+  dlg.append(form);
+  document.body.append(dlg);
+  dlg.addEventListener('close', () => { dlg.remove(); invoker?.focus?.(); }, { once: true });
+  dlg.showModal();
+  form.querySelector('h2').focus();
 }

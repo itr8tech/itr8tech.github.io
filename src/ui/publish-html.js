@@ -36,7 +36,9 @@ async function encodeHeaderImage(hi, images) {
   } catch { return null; }
 }
 
-export async function buildPathwayHtml(db, { id }) {
+// attribution: OFF by default — author names are only published when the curator opts in
+// (setting 'publish_attribution'; richer attribution — bio, author link — is a recorded TODO).
+export async function buildPathwayHtml(db, { id, attribution = false }) {
   const d = await db.exportPathwayData(id);
   const p = d.obj.pathway;
   const slug = slugify(p.name);
@@ -59,17 +61,17 @@ export async function buildPathwayHtml(db, { id }) {
 
   const mdBlock = (cls, src) => el('div', { class: cls }, renderMarkdown(src));
 
-  // ---- header ----
+  // ---- header (banner image first, content warning directly under it) ----
   body.append(el('a', { class: 'skip-link', href: '#steps' }, 'Skip to the steps'));
   const header = el('header', { class: 'page-header' },
     el('h1', {}, p.name || 'Pathway'),
     el('p', { class: 'byline' },
-      [p.created_by ? `Curated by ${p.created_by}` : null,
+      [attribution && p.created_by ? `Curated by ${p.created_by}` : null,
         p.version ? `version ${p.version}` : null,
         `exported ${today()}`].filter(Boolean).join(' · ')));
+  if (headerImgUrl) header.append(el('img', { class: 'header-img', src: headerImgUrl, alt: '' }));
   if (p.content_warning) header.append(el('div', { class: 'content-warning', role: 'note' },
     el('strong', {}, 'Content warning'), mdBlock('cw-body', p.content_warning)));
-  if (headerImgUrl) header.append(el('img', { class: 'header-img', src: headerImgUrl, alt: '' }));
   if (p.description) header.append(mdBlock('description', p.description));
   body.append(header);
 
@@ -84,34 +86,44 @@ export async function buildPathwayHtml(db, { id }) {
       el('input', { type: 'search', id: 'search', placeholder: 'Search this pathway…', 'aria-label': 'Search this pathway' }),
       el('button', { type: 'button', id: 'expand-all' }, 'Expand all'),
       el('button', { type: 'button', id: 'collapse-all' }, 'Collapse all'),
-      el('button', { type: 'button', id: 'theme-btn', 'aria-label': 'Switch colour theme' }, 'Theme'),
-      el('button', { type: 'button', id: 'save-progress' }, '💾 Save progress'),
-      el('button', { type: 'button', id: 'restore-progress' }, '↥ Restore progress'),
+      el('details', { class: 'gear' },
+        el('summary', { 'aria-label': 'Settings: theme and progress' }, '⚙'),
+        el('div', { class: 'gear-menu' },
+          el('button', { type: 'button', id: 'theme-btn' }, '🌗 Switch theme'),
+          el('button', { type: 'button', id: 'save-progress' }, '💾 Save progress'),
+          el('button', { type: 'button', id: 'restore-progress' }, '↥ Restore progress'))),
       el('input', { type: 'file', id: 'restore-file', accept: 'application/json,.json', hidden: true })),
     el('p', { class: 'notice', id: 'storage-note', hidden: true },
       'Progress can’t be saved in this context — it will last for this session only. Use “Save progress” to keep a copy.'),
     el('p', { class: 'notice', id: 'search-count', hidden: true, role: 'status' }, '')));
 
   // ---- steps ----
+  // Steps AND links are collapsed by default: the page opens as a scannable outline (titles +
+  // badges), each link expanding to its description, context, and launch button. Each link is its
+  // own card so entries don't bleed together.
   const stepsWrap = el('main', { id: 'steps' });
   (p.steps || []).forEach((s, i) => {
     const articles = (s.bookmarks || []).map((b) => {
       const safe = safeUrl(b.url);
       return el('article', { class: 'bm', 'data-bm-id': String(b.id), 'data-required': b.required ? '1' : '0' },
-        el('h3', {}, b.title || b.url),
-        el('p', { class: 'bm-badges' },
-          el('span', { class: 'badge type' }, b.content_type || 'Read'),
-          el('span', { class: `badge ${b.required ? 'req' : 'bonus'}` }, b.required ? 'Required' : 'Bonus'),
-          el('span', { class: 'badge launched-badge' }, '✓ Launched')),
-        b.description ? mdBlock('bm-desc', b.description) : null,
-        b.context ? el('div', { class: 'bm-context' }, el('strong', {}, 'Context: '), renderMarkdown(b.context)) : null,
-        el('p', { class: 'bm-actions' },
-          safe ? el('a', { class: 'launch-btn', href: safe, target: '_blank', rel: 'noopener noreferrer', 'data-bm-id': String(b.id) }, 'Launch ↗')
-            : el('span', { class: 'bm-nolink' }, `${b.url} (link unavailable)`),
-          el('button', { type: 'button', class: 'mark-done', 'data-bm-id': String(b.id) }, 'mark as done')));
+        el('details', {},
+          el('summary', {},
+            el('h3', {}, b.title || b.url),
+            el('span', { class: 'bm-badges' },
+              el('span', { class: 'badge type' }, b.content_type || 'Read'),
+              el('span', { class: `badge ${b.required ? 'req' : 'bonus'}` }, b.required ? 'Required' : 'Bonus'),
+              el('span', { class: 'badge launched-badge' }, '✓ Launched'))),
+          el('div', { class: 'bm-body' },
+            b.description ? mdBlock('bm-desc', b.description) : null,
+            b.context ? el('aside', { class: 'bm-context' },
+              el('span', { class: 'bm-context__label' }, 'Context'), renderMarkdown(b.context)) : null,
+            el('p', { class: 'bm-actions' },
+              safe ? el('a', { class: 'launch-btn', href: safe, target: '_blank', rel: 'noopener noreferrer', 'data-bm-id': String(b.id) }, 'Launch ↗')
+                : el('span', { class: 'bm-nolink' }, `${b.url} (link unavailable)`),
+              el('button', { type: 'button', class: 'mark-done', 'data-bm-id': String(b.id) }, 'mark as done')))));
     });
     stepsWrap.append(el('section', { class: 'step' },
-      el('details', { open: true },
+      el('details', {},
         el('summary', {},
           el('h2', {}, s.name || `Step ${i + 1}`), ' ',
           el('span', { class: 'step-summary muted' }, '')),
@@ -180,16 +192,30 @@ button:hover{border-color:var(--accent)}
 .step summary h2{display:inline}
 .step-summary{font-size:.85rem}
 .step-objective{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:.5rem}
-.bm{border-top:1px solid var(--border);padding:.75rem 0}
-.bm-badges{display:flex;gap:.4rem;margin:.2rem 0}
-.badge{font-size:.78rem;border:1px solid var(--border);border-radius:999px;padding:.05rem .55rem}
+.bm{border:1px solid var(--border);border-radius:10px;background:var(--bg);margin:.6rem 0;overflow:hidden}
+.bm>details{padding:.15rem .8rem}
+.bm summary{cursor:pointer;display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;padding:.45rem 0}
+.bm summary h3{display:inline;margin:0}
+.bm-body{padding:.25rem 0 .6rem;border-top:1px solid var(--border)}
+.bm-badges{display:inline-flex;gap:.4rem}
+.badge{font-size:.78rem;border:1px solid var(--border);border-radius:999px;padding:.05rem .55rem;background:var(--surface)}
 .badge.req{color:var(--danger);border-color:var(--danger)}
 .badge.bonus{color:var(--muted)}
 .badge.launched-badge{display:none;color:var(--ok);border-color:var(--ok);font-weight:700}
 .bm.is-launched .launched-badge{display:inline-block}
-.bm.is-launched h3{color:var(--ok)}
-.bm-context{font-size:.95rem;color:var(--muted)}
-.bm-actions{display:flex;gap:.6rem;align-items:center;margin:.4rem 0 0}
+.bm.is-launched summary h3{color:var(--ok)}
+.bm.is-launched{border-color:color-mix(in srgb,var(--ok) 45%,var(--border))}
+.bm-context{border-left:4px solid var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--surface));
+  border-radius:8px;padding:.5rem .8rem;margin:.6rem 0;font-size:.95rem}
+.bm-context__label{display:block;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:.15rem}
+.bm-actions{display:flex;gap:.6rem;align-items:center;margin:.5rem 0 0}
+.gear{position:relative;display:inline-block}
+.gear summary{list-style:none;cursor:pointer;font-size:1.1rem;padding:.25rem .55rem;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.gear summary::-webkit-details-marker{display:none}
+.gear[open] summary{border-color:var(--accent)}
+.gear-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:10;display:grid;gap:.35rem;padding:.5rem;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:11.5rem}
+.gear-menu button{text-align:left}
 .launch-btn{display:inline-block;background:var(--accent);color:#fff;border-radius:8px;padding:.35rem .9rem;text-decoration:none;font-weight:600}
 .mark-done{font-size:.8rem;color:var(--muted)}
 .bm-nolink{color:var(--muted);font-size:.9rem;word-break:break-all}
@@ -352,7 +378,11 @@ const TRACKER_JS = String.raw`(function () {
 
   // ---- expand / collapse / search ----
   function setAll(open) {
-    var ds = document.querySelectorAll('.step details');
+    var ds = document.querySelectorAll('.step > details, article.bm > details');
+    for (var i = 0; i < ds.length; i++) { if (open) ds[i].setAttribute('open', 'open'); else ds[i].removeAttribute('open'); }
+  }
+  function setSteps(open) {
+    var ds = document.querySelectorAll('.step > details');
     for (var i = 0; i < ds.length; i++) { if (open) ds[i].setAttribute('open', 'open'); else ds[i].removeAttribute('open'); }
   }
   document.getElementById('expand-all').addEventListener('click', function () { setAll(true); });
@@ -372,13 +402,15 @@ const TRACKER_JS = String.raw`(function () {
       count.hidden = true; count.textContent = '';
       return;
     }
-    setAll(true);
+    setSteps(true);
     var hits = 0;
     for (i = 0; i < prs.length; i++) prs[i].style.display = 'none';
     for (i = 0; i < articles.length; i++) {
       var match = (articles[i].textContent || '').toLowerCase().indexOf(q) !== -1;
       articles[i].style.display = match ? '' : 'none';
       articles[i].classList.toggle('search-hit', match);
+      var det = articles[i].querySelector('details');
+      if (det) { if (match) det.setAttribute('open', 'open'); else det.removeAttribute('open'); }
       if (match) hits++;
     }
     var st = document.querySelectorAll('.step');

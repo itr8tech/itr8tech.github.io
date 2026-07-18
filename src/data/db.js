@@ -65,7 +65,7 @@ const READ_OPS = new Set(['counts', 'listPathways', 'getWorkspaces', 'getPathway
   // P5 audit reads
   'listExemptDomains', 'listFlaggedBookmarks', 'serializeAuditOverrides', 'serializeExemptDomains',
   // P6 exports are read-shaped → followers can export too
-  'exportPathwayData', 'exportWorkspaceData', 'exportBackupData']);
+  'exportPathwayData', 'exportWorkspaceData', 'exportBackupData', 'listAuditUrls']);
 function call(op, args, change) {
   return init().then(() => (READ_OPS.has(op) ? coord.read(op, args) : coord.write(op, args, change)));
 }
@@ -183,6 +183,7 @@ export const db = {
   serializeAuditOverrides: (workspaceId) => call('serializeAuditOverrides', { workspaceId }),
   mergeAuditOverrides: (a) => call('mergeAuditOverrides', a, { type: 'change', entity: 'bookmarks' }),
   serializeExemptDomains: () => call('serializeExemptDomains'),
+  listAuditUrls: (workspaceId = null) => call('listAuditUrls', { workspaceId }),
   mergeExemptDomains: (a) => call('mergeExemptDomains', a, { type: 'change', entity: 'bookmarks' }),
 
   // ---- sync-state writes (broadcast 'sync' so the indicator refreshes but views don't churn) ----

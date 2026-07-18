@@ -878,11 +878,11 @@ function mergeAuditResults({ workspaceId, results = {}, checkMethod = 'github-ac
               WHERE url_norm=?
                 AND NOT (check_method IS 'pinned' OR (check_method IS 'manual' AND last_checked > ?))
                 AND step_id IN (
-                SELECT s.id FROM steps s JOIN pathways p ON p.id=s.pathway_id WHERE p.workspace_id=?)`,
+                SELECT s.id FROM steps s JOIN pathways p ON p.id=s.pathway_id WHERE p.workspace_id IS ?)`,
         bind: [Number(r?.checkedAt) || Date.now(), r?.available ? 1 : 0,
                Number.isInteger(r?.httpStatus) ? r.httpStatus : null,
                r?.statusLabel != null ? String(r.statusLabel).slice(0, 40) : null,
-               redirect, r?.checkError != null ? String(r.checkError).slice(0, 200) : null,
+               redirect != null ? redirect.slice(0, 500) : null, r?.checkError != null ? String(r.checkError).slice(0, 200) : null,
                r?.requiresAuth ? 1 : 0, String(checkMethod).slice(0, 20),
                Number.isInteger(r?.durationMs) ? r.durationMs : null,
                String(urlNorm), cutoff, workspaceId],
@@ -967,6 +967,31 @@ function listFlaggedBookmarks() {
     }
     return { ...b, override: null };
   });
+}
+
+// P8: the URL list for an extension-side audit of ONE workspace (workspaceId null = pathways with
+// no workspace). {url_norm, url} pairs, first occurrence per norm (mirror audit.mjs: FETCH url,
+// key results by url_norm), excluding exempt hosts and active overrides — URLs the curator opted
+// out of are never even fetched.
+function listAuditUrls({ workspaceId = null } = {}) {
+  const exempt = db.selectObjects('SELECT domain FROM exempt_domains').map((r) => r.domain);
+  const cutoff = Date.now() - AUDIT_MANUAL_TTL_MS;
+  const rows = db.selectObjects(`
+    SELECT b.url, b.url_norm, b.check_method, b.last_checked
+      FROM bookmarks b JOIN steps s ON s.id=b.step_id JOIN pathways p ON p.id=s.pathway_id
+     WHERE p.workspace_id IS ? ORDER BY p.sort_order, s.sort_order, b.sort_order`, [workspaceId]);
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const norm = r.url_norm || r.url;
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    if (exempt.length && hostExempt(auditHostOf(r.url), exempt)) continue;
+    if (r.check_method === 'pinned') continue;
+    if (r.check_method === 'manual' && (r.last_checked ?? 0) > cutoff) continue;
+    out.push({ url_norm: norm, url: r.url });
+  }
+  return out;
 }
 
 // Manual audit override for a single bookmark. Two strengths:
@@ -1078,7 +1103,7 @@ const OPS = {
   // ===== P5 link audit =====
   mergeAuditResults, listExemptDomains, addExemptDomain, removeExemptDomain,
   serializeExemptDomains, mergeExemptDomains,
-  listFlaggedBookmarks, setBookmarkAuditStatus, serializeAuditOverrides, mergeAuditOverrides,
+  listFlaggedBookmarks, setBookmarkAuditStatus, serializeAuditOverrides, mergeAuditOverrides, listAuditUrls,
 };
 
 self.onmessage = async (e) => {

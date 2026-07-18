@@ -74,16 +74,25 @@ function renderManualForm(prefill = {}) {
 }
 
 // ---- entry ----
+// P8: `source` is allowlisted to the schema enum; `ref` is accepted when well-formed so callers
+// (the extension) get REAL idempotency — a reloaded/double-opened capture page re-appends the SAME
+// ref and the outbox/inbox dedupe instead of duplicating. Malformed values → safe defaults.
+const SOURCES = new Set(['extension', 'bookmarklet', 'share-target', 'protocol', 'manual']);
+const REF_RE = /^(ext|bookmarklet|share|manual):[A-Za-z0-9-]{1,64}$/;
 if (params.get('shared') === '1') {
   renderSaved({ autoClose: false });                 // the Web-Share SW already appended — confirm only
 } else {
   const url = (params.get('url') || '').trim();
   const title = params.get('title');
   const text = params.get('text') || params.get('description');
+  const note = params.get('note');
+  const source = SOURCES.has(params.get('source')) ? params.get('source') : 'bookmarklet';
+  const refParam = params.get('ref');
+  const ref = REF_RE.test(refParam || '') ? refParam : `bookmarklet:${crypto.randomUUID()}`;
   if (!url) {
     renderManualForm({ title });                     // empty url → manual form (never an error)
   } else {
-    save({ ref: `bookmarklet:${crypto.randomUUID()}`, url, title: title || null, note: null,
-           description: text || null, imageUrl: null, contentType: 'Read', source: 'bookmarklet', capturedAt: Date.now() });
+    save({ ref, url, title: title || null, note: note || null,
+           description: text || null, imageUrl: null, contentType: 'Read', source, capturedAt: Date.now() });
   }
 }

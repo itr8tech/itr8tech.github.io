@@ -6,6 +6,8 @@
 // audit/overrides.json, so they travel between devices and the audit workflow skips them.
 import { el, clear, ttButton as ttButtonBase } from '../dom.js';
 import { confirmDelete } from '../editors.js';
+import { onExtension, extensionInfo, runExtensionAudit } from '../ext-bridge.js';
+import { toast } from '../toast.js';
 
 function relTime(ts) {
   if (!ts) return '';
@@ -18,16 +20,20 @@ function relTime(ts) {
 function category(b) {
   if (b.check_method === 'manual' || b.check_method === 'pinned') return b.available === 1 ? 'verified' : 'broken';
   if (b.requires_auth || b.status_label === 'Auth required') return 'auth';
-  if (b.available === 0 && (b.status_label === 'Timeout' || b.status_label === 'Blocked')) return 'unreachable';
+  if (b.available === 0 && (b.status_label === 'Timeout' || b.status_label === 'Blocked'))
+    // A CI timeout may be an on-network false positive; a timeout from YOUR OWN browser is the
+    // opposite — a strong broken signal. Different sections, different honesty.
+    return b.check_method === 'extension' ? 'unreachable-ext' : 'unreachable';
   if (b.available === 0) return 'broken';
   if (b.redirect_url) return 'redirect';
   return 'other';
 }
 const SECTIONS = [
   ['broken', '🔴 Broken'],
+  ['unreachable-ext', '🚫 Unreachable from your browser (extension check — likely really broken)'],
   ['auth', '🔑 Auth required (login-walled — usually fine)'],
   ['redirect', '↪️ Redirected'],
-  ['unreachable', '⚠️ Couldn’t verify (timeout / blocked — may be fine on-network)'],
+  ['unreachable', '⚠️ Couldn’t verify from CI (timeout / blocked — may be fine on-network)'],
   ['verified', '✅ Verified good (you marked these)'],
 ];
 // A short human note on the override's lifetime, shown in the row meta.
@@ -47,7 +53,9 @@ const ACTIONS = [
 export default async function mount(container, params, ctx) {
   const root = el('div', { class: 'view-content audit-view' });
   container.append(root);
-  const controller = { title: 'Link audit', refresh, destroy() {} };
+  let extSeen = !!extensionInfo();
+  const offExt = onExtension(() => { if (!extSeen) { extSeen = true; refresh(); } });
+  const controller = { title: 'Link audit', refresh, destroy() { offExt(); } };
   const openState = {};   // section key → open? — survives refresh() re-renders after each action
   const act = async (fn) => { try { await fn(); } catch (e) { ctx.announce(e.message || 'Action failed.', { assertive: true }); } };
 
@@ -144,6 +152,39 @@ export default async function mount(container, params, ctx) {
     return sec;
   }
 
+  // P8: live audit via the browser extension — shown only when the bridge announces itself.
+  // ALL workspaces (connected or not — repo-less curators are the audience) + a bucket for
+  // workspace-less pathways. Results are device-local (the committed results.json stays
+  // Action-owned).
+  async function renderExtensionSection() {
+    if (!extensionInfo()) return null;
+    const workspaces = await ctx.db.getWorkspaces();
+    const targets = workspaces.map((w) => ({ id: w.id, label: w.org_label }));
+    const localCount = (await ctx.db.listAuditUrls(null)).length;
+    if (localCount) targets.push({ id: null, label: 'Local pathways (no workspace)' });
+    if (!targets.length) return null;
+    const sec = el('section', { class: 'exempt-section', 'aria-labelledby': 'extaudit-h' });
+    sec.append(el('h2', { id: 'extaudit-h' }, 'Browser-extension audit'),
+      el('p', { class: 'muted' }, 'Checks every link from THIS browser — including intranet links CI can’t reach. Results apply on this device only (the committed results file stays with the workflow). Exempted and pinned/verified links are skipped.'));
+    const list = el('ul', { class: 'exempt-list', role: 'list' });
+    for (const t of targets) {
+      const status = el('span', { class: 'muted', role: 'status' });
+      const run = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-ext-audit': t.id ?? 'local', style: 'margin-inline-start:auto' }, '🔎 Audit now');
+      run.addEventListener('click', async () => {
+        run.disabled = true; status.textContent = 'starting…';
+        try {
+          const r = await runExtensionAudit(ctx.db, t.id, (done, total) => { status.textContent = `checked ${done} of ${total}…`; });
+          status.textContent = '';
+          toast(`${t.label}: audited ${r.total} link${r.total === 1 ? '' : 's'} — ${r.updated} updated${r.failedChunks ? ` (${r.failedChunks} batch${r.failedChunks === 1 ? '' : 'es'} failed: ${r.lastError})` : ''}.`);
+        } catch (e) { status.textContent = e.message || 'Audit failed.'; }
+        finally { run.disabled = false; }
+      });
+      list.append(el('li', {}, el('strong', {}, t.label), run, status));
+    }
+    sec.append(list);
+    return sec;
+  }
+
   // Link-audit exemptions: domains the auditor skips. Global; committed (audit/config.json) so the
   // Action honours them. Lives HERE with the rest of the audit tooling, not on #/sync.
   async function renderExemptSection() {
@@ -183,6 +224,8 @@ export default async function mount(container, params, ctx) {
     if (!flagged.length) {
       root.append(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
       if (primary) {
+        const ext = await renderExtensionSection();
+        if (ext) root.append(ext);
         const wf = await renderWorkflowSection();
         if (wf) root.append(wf);
         root.append(await renderExemptSection());
@@ -203,6 +246,8 @@ export default async function mount(container, params, ctx) {
       root.append(section(key, label, items, primary));
     }
     if (primary) {
+      const ext = await renderExtensionSection();
+      if (ext) root.append(ext);
       const wf = await renderWorkflowSection();
       if (wf) root.append(wf);
       root.append(await renderExemptSection());

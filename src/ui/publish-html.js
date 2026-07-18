@@ -86,13 +86,13 @@ export async function buildPathwayHtml(db, { id, attribution = false }) {
       el('input', { type: 'search', id: 'search', placeholder: 'Search this pathway…', 'aria-label': 'Search this pathway' }),
       el('button', { type: 'button', id: 'expand-all' }, 'Expand all'),
       el('button', { type: 'button', id: 'collapse-all' }, 'Collapse all'),
-      el('details', { class: 'gear' },
-        el('summary', { 'aria-label': 'Settings: theme and progress' }, '⚙'),
-        el('div', { class: 'gear-menu' },
-          el('button', { type: 'button', id: 'theme-btn' }, '🌗 Switch theme'),
-          el('button', { type: 'button', id: 'save-progress' }, '💾 Save progress'),
-          el('button', { type: 'button', id: 'restore-progress' }, '↥ Restore progress'),
-          el('button', { type: 'button', id: 'dl-bookmarks', title: 'Download this pathway as a bookmarks file you can import into any browser — a folder per step' }, '🔖 Browser bookmarks'))),
+      // Popover API (not details/summary): light-dismiss on outside click + Esc + top layer, free.
+      el('button', { type: 'button', class: 'gear-btn', popovertarget: 'gear-menu', 'aria-label': 'Settings: theme and progress' }, '⚙'),
+      el('div', { class: 'gear-menu', id: 'gear-menu', popover: 'auto' },
+        el('button', { type: 'button', id: 'theme-btn' }, '🌗 Switch theme'),
+        el('button', { type: 'button', id: 'save-progress' }, '💾 Save progress'),
+        el('button', { type: 'button', id: 'restore-progress' }, '↥ Restore progress'),
+        el('button', { type: 'button', id: 'dl-bookmarks', title: 'Download this pathway as a bookmarks file you can import into any browser — a folder per step' }, '🔖 Browser bookmarks')),
       el('input', { type: 'file', id: 'restore-file', accept: 'application/json,.json', hidden: true })),
     el('p', { class: 'notice', id: 'storage-note', hidden: true },
       'Progress can’t be saved in this context — it will last for this session only. Use “Save progress” to keep a copy.'),
@@ -218,12 +218,13 @@ button:hover{border-color:var(--accent)}
   border-radius:8px;padding:.5rem .8rem;margin:.6rem 0;font-size:.95rem}
 .bm-context__label{display:block;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:.15rem}
 .bm-actions{display:flex;gap:.6rem;align-items:center;margin:.5rem 0 0}
-.gear{position:relative;display:inline-block}
-.gear summary{list-style:none;cursor:pointer;font-size:1.1rem;padding:.25rem .55rem;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
-.gear summary::-webkit-details-marker{display:none}
-.gear[open] summary{border-color:var(--accent)}
-.gear-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:10;display:grid;gap:.35rem;padding:.5rem;
-  background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:11.5rem}
+.gear-btn{font-size:1.1rem;padding:.25rem .55rem}
+.gear-btn[aria-expanded="true"]{border-color:var(--accent)}
+/* display ONLY under :popover-open — an unconditional display would defeat the UA's
+   closed-popover display:none (same trap as [hidden]). Position is set by script on toggle. */
+.gear-menu[popover]{position:fixed;inset:auto;margin:0;gap:.35rem;padding:.5rem;
+  background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:11.5rem}
+.gear-menu:popover-open{display:grid}
 .gear-menu button{text-align:left}
 .launch-btn{display:inline-block;background:var(--accent);color:#fff;border-radius:8px;padding:.35rem .9rem;text-decoration:none;font-weight:600}
 .mark-done{font-size:.8rem;color:var(--muted)}
@@ -474,6 +475,20 @@ const TRACKER_JS = String.raw`(function () {
     }
     count.hidden = false;
     count.textContent = hits + ' matching link' + (hits === 1 ? '' : 's');
+  });
+
+  // ---- gear popover: anchor beside the button on open (CSS anchor positioning isn't universal
+  // yet); mirror the open state onto the button for styling/AT.
+  var gearBtn = document.querySelector('.gear-btn');
+  var gearMenu = document.getElementById('gear-menu');
+  gearMenu.addEventListener('toggle', function (e) {
+    var open = e.newState === 'open';
+    gearBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!open) return;
+    var r = gearBtn.getBoundingClientRect();
+    gearMenu.style.top = (r.bottom + 4) + 'px';
+    gearMenu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    gearMenu.style.left = 'auto';
   });
 
   // ---- theme + scroll-to-top ----

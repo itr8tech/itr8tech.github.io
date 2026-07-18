@@ -96,7 +96,17 @@ export default async function mount(container, params, ctx) {
         (ev) => confirmDelete({ noun: 'pathway', name: p.name, invoker: ev.currentTarget,
           onConfirm: async () => { await ctx.db.deletePathway({ id: p.id }); ctx.navigate('#/'); } })),
       btn('+ Step', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': `add-step:${p.id}` },
-        (ev) => openStepEditor({ pathwayId: p.id, invoker: ev.currentTarget, ctx }))));
+        (ev) => openStepEditor({ pathwayId: p.id, invoker: ev.currentTarget, ctx })),
+      // P6: read-shaped → usable from a follower tab too
+      btn('⬇ Export', { class: 'btn', 'data-focus-key': `export-pathway:${p.id}` }, async () => {
+        try {
+          const { buildExportFile } = await import('/src/data/exchange.js');
+          const { downloadFile } = await import('../import-dialog.js');
+          const { filename, content } = await buildExportFile(ctx.db, { scope: 'pathway', id: p.id });
+          downloadFile(filename, content);
+          ctx.announce(`Exported ${filename}.`);
+        } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
+      })));
 
     if (p.steps.length) root.append(el('div', { class: 'steps-toolbar' },
       el('button', { type: 'button', class: 'btn btn--subtle', 'data-collapse-all': 'collapse' }, 'Collapse all')));

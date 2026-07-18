@@ -640,25 +640,97 @@ function materializePathway(wsId, wrap, order, images = {}) {
   return quarantined;
 }
 
-// P6: import already-converted pathway objects (e.g. from the legacy curator-pathways.json) into an
-// EXISTING workspace as plain local content. sync_state is NOT touched — everything arrives
-// UNCOMMITTED, so the next commit writes the v2 layout to the repo. Existing pathway ids are
-// SKIPPED, never clobbered (an accidental re-import is a no-op), which also makes the offer
-// idempotent across devices (deterministic ids from the converter).
-function importPathwaysIntoWorkspace({ workspaceId, pathways = [], images = {} }) {
+// P6: import pathway objects (converted legacy, or a file-exchange import) into local content.
+// sync_state is NOT touched — everything arrives UNCOMMITTED. Existing pathway ids are SKIPPED
+// unless listed in `replace` (the user explicitly chose "Take import"), and a replace happens
+// IN PLACE: same workspace, same sort_order slot — an import never moves a pathway between
+// workspaces (that would silently delete it from one repo and add it to another on commit).
+// Images are UNTRUSTED: each entry's sha256 is RECOMPUTED and must match its claimed key; wrong
+// hash / disallowed mime / >5MB → dropped (protects content-addressed dedup + the repo image
+// store). Added pathways park at high sort_order then every touched workspace is renumbered;
+// orphaned header-image attachments are GC'd (mirrors applyPull).
+const IMPORT_IMG_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+async function importPathwaysIntoWorkspace({ workspaceId, pathways = [], images = {}, replace = [] }) {
   if (!db.selectValue('SELECT 1 FROM workspaces WHERE id=?', [workspaceId])) throw new Error('Workspace not found.');
-  let added = 0, skipped = 0, quarantined = 0;
+  const verified = {};
+  for (const [sha, img] of Object.entries(images || {})) {          // async → resolved before the transaction
+    const bytes = img?.bytes instanceof Uint8Array ? img.bytes : img?.bytes ? new Uint8Array(img.bytes) : null;
+    if (!bytes || !bytes.byteLength || bytes.byteLength > 5 * 1024 * 1024) continue;
+    if (!IMPORT_IMG_MIME.has(img.mime)) continue;
+    if ((await sha256HexBytes(bytes)) !== sha) continue;            // the claimed hash must be TRUE
+    verified[sha] = { bytes, mime: img.mime, ext: img.ext };
+  }
+  const allow = new Set((replace || []).map(String));
+  let added = 0, replaced = 0, skipped = 0, quarantined = 0;
   db.transaction(() => {
-    const base = db.selectValue('SELECT COALESCE(MAX(sort_order),-1)+1 FROM pathways WHERE workspace_id=?', [workspaceId]);
+    let park = PARK;
+    const touched = new Set([workspaceId]);
     for (const wrap of pathways) {
       const p = wrap?.pathway ?? wrap;
       if (!p?.id || !p?.name) { skipped++; continue; }
-      if (db.selectValue('SELECT 1 FROM pathways WHERE id=?', [String(p.id)])) { skipped++; continue; }
-      quarantined += materializePathway(workspaceId, wrap, base + added, images);
-      added++;
+      const existing = db.selectObject('SELECT workspace_id, sort_order FROM pathways WHERE id=?', [String(p.id)]);
+      // A malformed/hand-edited file can reuse step/bookmark ids that belong to a DIFFERENT
+      // pathway — that would PK-abort the whole transaction. Skip just that pathway instead.
+      const collides = (p.steps ?? []).some((s) =>
+        db.selectValue('SELECT 1 FROM steps WHERE id=? AND pathway_id IS NOT ?', [String(s.id), String(p.id)]) ||
+        (s.bookmarks ?? []).some((b) => db.selectValue(
+          'SELECT 1 FROM bookmarks WHERE id=? AND step_id NOT IN (SELECT id FROM steps WHERE pathway_id=?)',
+          [String(b.id), String(p.id)])));
+      if (collides) { skipped++; continue; }
+      if (existing) {
+        if (!allow.has(String(p.id))) { skipped++; continue; }
+        quarantined += materializePathway(existing.workspace_id, wrap, existing.sort_order, verified);
+        touched.add(existing.workspace_id);
+        replaced++;
+      } else {
+        quarantined += materializePathway(workspaceId, wrap, park++, verified);
+        added++;
+      }
+    }
+    for (const ws of touched)
+      renumber('pathways', db.selectObjects('SELECT id FROM pathways WHERE workspace_id=? ORDER BY sort_order', [ws]).map((r) => r.id));
+    if (added || replaced) {
+      db.exec(`DELETE FROM attachments WHERE id NOT IN (
+        SELECT header_image_id FROM pathways WHERE header_image_id IS NOT NULL
+        UNION SELECT image_blob_id FROM inbox WHERE image_blob_id IS NOT NULL)`);
     }
   });
-  return { added, skipped, quarantined };
+  return { added, replaced, skipped, quarantined };
+}
+
+// ---- P6: file-exchange exports. One canonical shape everywhere: serializePathway per pathway
+// (NOT serializeWorkspace — that stamps synthetic versions for commits) + the referenced
+// header-image bytes so the file is self-contained. Read-shaped; never tokens or sync state.
+async function exportPathwayData({ id }) {
+  const ser = await serializePathway(id);
+  if (!ser) throw new Error('Pathway not found.');
+  const images = {};
+  const hi = ser.obj.pathway.header_image;
+  if (hi?.sha256) {
+    const a = db.selectObject('SELECT bytes, mime, sha256 FROM attachments WHERE sha256=?', [hi.sha256]);
+    if (a) images[a.sha256] = { bytes: a.bytes instanceof Uint8Array ? a.bytes : new Uint8Array(a.bytes), mime: a.mime, ext: hi.ext || 'jpg' };
+  }
+  return { obj: ser.obj, contentHash: ser.contentHash, images };
+}
+async function exportWorkspaceData({ workspaceId }) {
+  const ws = db.selectObject('SELECT id, org_label, colour, owner, repo, branch, path FROM workspaces WHERE id=?', [workspaceId]);
+  if (!ws) throw new Error('Workspace not found.');
+  const pathways = [], images = {};
+  for (const r of db.selectObjects('SELECT id FROM pathways WHERE workspace_id=? ORDER BY sort_order', [workspaceId])) {
+    const one = await exportPathwayData({ id: r.id });
+    pathways.push(one.obj);
+    Object.assign(images, one.images);
+  }
+  return { workspace: ws, pathways, images, overrides: serializeAuditOverrides({ workspaceId }).overrides };
+}
+async function exportBackupData() {
+  const workspaces = [], images = {};
+  for (const w of db.selectObjects('SELECT id FROM workspaces ORDER BY org_label')) {
+    const d = await exportWorkspaceData({ workspaceId: w.id });
+    workspaces.push({ workspace: d.workspace, pathways: d.pathways, overrides: d.overrides });
+    Object.assign(images, d.images);
+  }
+  return { workspaces, images, exempt: serializeExemptDomains().exempt };
 }
 
 // Apply a resolved pull, transactionally + idempotently, then advance the sync baseline.
@@ -985,6 +1057,7 @@ const OPS = {
   getSyncState, setSyncState, markCommitted,
   serializeWorkspace, getUncommittedCount, serializePathway,
   getLocalHashes, hasAttachmentSha, applyPull, importPathwaysIntoWorkspace,
+  exportPathwayData, exportWorkspaceData, exportBackupData,
   // ===== P4 inbox =====
   addInboxItem, listInbox, countInboxUnsorted, updateInboxStatus, deleteInboxItem, triageInboxItem,
   // ===== P5 link audit =====

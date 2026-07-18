@@ -63,7 +63,9 @@ const READ_OPS = new Set(['counts', 'listPathways', 'getWorkspaces', 'getPathway
   // P4 inbox reads
   'listInbox', 'countInboxUnsorted',
   // P5 audit reads
-  'listExemptDomains', 'listFlaggedBookmarks', 'serializeAuditOverrides', 'serializeExemptDomains']);
+  'listExemptDomains', 'listFlaggedBookmarks', 'serializeAuditOverrides', 'serializeExemptDomains',
+  // P6 exports are read-shaped → followers can export too
+  'exportPathwayData', 'exportWorkspaceData', 'exportBackupData']);
 function call(op, args, change) {
   return init().then(() => (READ_OPS.has(op) ? coord.read(op, args) : coord.write(op, args, change)));
 }
@@ -152,6 +154,9 @@ export const db = {
   applyPull: (a) => call('applyPull', a, { type: 'change', entity: 'pathways' }),
   // P6: converted-legacy import into an existing workspace → '*' so dashboard + sync status refresh
   importPathwaysIntoWorkspace: (a) => call('importPathwaysIntoWorkspace', a, { type: 'change', entity: '*' }),
+  exportPathwayData: (id) => call('exportPathwayData', { id }),
+  exportWorkspaceData: (workspaceId) => call('exportWorkspaceData', { workspaceId }),
+  exportBackupData: () => call('exportBackupData'),
 
   // ================= P4: capture inbox =================
   drainCaptureOutbox: () => drainCaptureOutbox(),

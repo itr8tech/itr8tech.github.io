@@ -4,11 +4,35 @@ import { openPathwayEditor, openWorkspaceEditor, confirmDelete } from '../editor
 import { openConnectRepo } from '../connect.js';
 import { syncRow } from '../sync-indicator.js';
 import { initReorder, reorderControls } from '../reorder.js';
+import { openImportDialog, downloadFile } from '../import-dialog.js';
+import { buildExportFile } from '/src/data/exchange.js';
 export default async function mount(container, params, ctx) {
   const root = el('div', { class: 'view-content' }); container.append(root);
   let teardownReorder = null;
   const controller = { title: 'Dashboard', refresh, destroy() { teardownReorder?.(); } };
   const btn = (txt, props, fn) => { const b = el('button', { type: 'button', ...props }, txt); b.addEventListener('click', fn); return b; };
+
+  // P6: export any scope to a self-contained file; announce oversized backups honestly.
+  async function doExport(scope, id, invoker) {
+    try {
+      const { filename, content, oversized } = await buildExportFile(ctx.db, { scope, id });
+      downloadFile(filename, content);
+      ctx.announce(oversized
+        ? `Exported ${filename} — WARNING: this file exceeds the import size cap; export workspaces individually instead.`
+        : `Exported ${filename}.`);
+    } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
+  }
+  // P6: import via picker or drag-drop — both primary-only (imports are writes).
+  const importFile = (file, invoker) => {
+    if (!ctx.isPrimary()) { ctx.announce('This tab is read-only — import from the primary tab.', { assertive: true }); return; }
+    if (file) openImportDialog({ file, invoker, ctx });
+  };
+  root.addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
+  root.addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    importFile(e.dataTransfer.files[0], null);
+  });
   async function refresh() {
     const [workspaces, pathways] = await Promise.all([ctx.db.getWorkspaces(), ctx.db.listPathways()]);
     const primary = ctx.isPrimary();
@@ -20,9 +44,18 @@ export default async function mount(container, params, ctx) {
     for (const p of pathways) byWs.get(p.workspace_id)?.items.push(p);
     clear(root);
     root.append(el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Pathways'));
-    if (primary) root.append(el('div', { class: 'dashboard-actions' },
-      btn('+ New workspace', { class: 'btn btn--primary', 'data-requires-primary': true, 'data-focus-key': 'new-workspace' },
-        (ev) => openConnectRepo({ invoker: ev.currentTarget, ctx }))));
+    if (primary) {
+      const fileInput = el('input', { type: 'file', accept: 'application/json,.json', hidden: true, 'data-import-input': true });
+      fileInput.addEventListener('change', () => { importFile(fileInput.files?.[0], fileInput); fileInput.value = ''; });
+      root.append(el('div', { class: 'dashboard-actions' },
+        btn('+ New workspace', { class: 'btn btn--primary', 'data-requires-primary': true, 'data-focus-key': 'new-workspace' },
+          (ev) => openConnectRepo({ invoker: ev.currentTarget, ctx })),
+        btn('⬆ Import file…', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': 'import-file', title: 'Import a pathway, workspace, backup, or legacy export (or drag a file onto this page)' },
+          () => fileInput.click()),
+        btn('⬇ Back up everything', { class: 'btn', 'data-focus-key': 'backup-all' },
+          (ev) => doExport('backup', null, ev.currentTarget)),
+        fileInput));
+    }
     if (primary && (totalUn > 0 || anyConflict)) root.append(el('p', { class: 'sync-summary', role: 'status' },
       anyConflict ? 'Some workspaces have sync conflicts — pull to review.'
         : `${totalUn} uncommitted change${totalUn === 1 ? '' : 's'} across your workspaces.`));
@@ -36,6 +69,8 @@ export default async function mount(container, params, ctx) {
         el('span', { class: `ws-conn ${connected ? 'is-connected' : 'is-disconnected'}` },
           connected ? `${ws.owner}/${ws.repo}` : 'Not connected'));
       if (primary) wsHeader.append(el('span', { class: 'row', style: 'margin-left:auto' },
+        btn('⬇', { class: 'btn btn--icon', 'aria-label': `Export workspace ${ws.org_label} to a file` },
+          (ev) => doExport('workspace', ws.id, ev.currentTarget)),
         btn('⚙', { class: 'btn btn--icon', 'aria-label': `Repository and sync settings for ${ws.org_label}`, 'data-requires-primary': true },
           (ev) => openConnectRepo({ workspace: ws, invoker: ev.currentTarget, ctx })),
         btn('✎', { class: 'btn btn--icon', 'aria-label': `Rename workspace ${ws.org_label}`, 'data-requires-primary': true },

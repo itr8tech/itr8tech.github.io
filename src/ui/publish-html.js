@@ -196,6 +196,13 @@ button:hover{border-color:var(--accent)}
 .step{margin:1rem 0}
 .step>details{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:.25rem .9rem}
 .step summary{cursor:pointer;padding:.5rem 0;display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+/* display:flex on summary silently removes the native disclosure marker — restore a visible
+   affordance with a pseudo caret. content:"▸" / "" (empty alt text) keeps the glyph OUT of the
+   accessible name; the a11y-tree semantics (expanded/collapsed) never depended on the marker. */
+.step summary::before,.bm summary::before{content:"▸" / "";flex:none;color:var(--muted);
+  transition:transform .15s;transform-origin:center}
+details[open]>summary::before{transform:rotate(90deg)}
+@media (prefers-reduced-motion:reduce){.step summary::before,.bm summary::before{transition:none}}
 .step summary h2{display:inline}
 .step-summary{font-size:.85rem}
 .step-objective{border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-bottom:.5rem}

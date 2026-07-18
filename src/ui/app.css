@@ -196,6 +196,20 @@
   .tt-wrap--end .tt{ left:auto; right:0; }   /* right-edge toolbars: keep the tip on-screen */
   .theme-toggle__icon{ font-size:1.05rem; line-height:1; }
   @media (prefers-reduced-motion:reduce){ .tt{ transition:none; } }
+  /* in-app help (#/help) */
+  .help-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(15rem,1fr)); gap:var(--space-3); margin:var(--space-3) 0 var(--space-5); }
+  .help-card{ display:grid; gap:var(--space-1); text-decoration:none; color:var(--text); padding:var(--space-4); position:relative; }
+  .help-card:hover{ border-color:var(--accent); color:var(--text); }
+  .help-card__num{ position:absolute; top:var(--space-3); right:var(--space-3); font-size:.8rem; font-weight:700; color:var(--muted); }
+  .help-card p{ margin:0; font-size:.9rem; }
+  .help-reflist{ list-style:none; margin:var(--space-3) 0; padding:0; display:grid; gap:var(--space-2); }
+  .help-crumb{ margin-bottom:var(--space-3); }
+  .help-body{ max-width:44rem; }
+  .help-body h3{ font-size:1.05rem; margin-top:var(--space-5); }
+  .help-related{ margin-top:var(--space-5); display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:baseline; }
+  .help-chip{ font-size:.85rem; border:1px solid var(--border); border-radius:var(--radius-pill); padding:.1em .7em; text-decoration:none; }
+  .help-chip:hover{ border-color:var(--accent); }
+
   /* markdown editor (Write/Preview + toolbar around a plain textarea) */
   .md-field{ display:grid; gap:var(--space-2); }
   .md-editor{ border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }

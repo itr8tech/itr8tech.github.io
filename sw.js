@@ -16,7 +16,7 @@ const PRECACHE = [
   '/src/ui/sync-indicator.js', '/src/ui/theme.js', '/src/ui/theme-guard.js', '/src/ui/inbox-badge.js', '/src/ui/inbox-triage.js', '/src/ui/pathway-diff.js', '/src/ui/import-dialog.js', '/src/ui/download.js', '/src/ui/publish-html.js', '/src/ui/publish-feeds.js', '/src/ui/toast.js', '/src/ui/md-editor.js', '/src/ui/ext-bridge.js',
   // route/dialog modules (dynamically imported → precache explicitly)
   '/src/ui/views/dashboard.js', '/src/ui/views/merge.js', '/src/ui/views/notfound.js',
-  '/src/ui/views/pathway.js', '/src/ui/views/sync.js', '/src/ui/views/inbox.js', '/src/ui/views/audit.js',
+  '/src/ui/views/pathway.js', '/src/ui/views/sync.js', '/src/ui/views/inbox.js', '/src/ui/views/audit.js', '/src/ui/views/help.js', '/src/ui/help-content.js',
   // data modules
   '/src/data/canonical.js', '/src/data/capture-outbox.js', '/src/data/coordinator.js', '/src/data/db-worker.js', '/src/data/legacy.js', '/src/data/exchange.js', '/src/data/netscape.js',
   '/src/data/db.js', '/src/data/github.js', '/src/data/merge.js', '/src/data/schema.js', '/src/data/secrets.js',

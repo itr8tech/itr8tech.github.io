@@ -60,7 +60,7 @@ export default async function mount(container, params, ctx) {
     if (primary && (totalUn > 0 || anyConflict)) root.append(el('p', { class: 'sync-summary', role: 'status' },
       anyConflict ? 'Some workspaces have sync conflicts — pull to review.'
         : `${totalUn} uncommitted change${totalUn === 1 ? '' : 's'} across your workspaces.`));
-    if (!workspaces.length) { root.append(el('p', { class: 'muted' }, 'No workspaces yet — create one to get started. You can connect it to a GitHub repo now or later.')); return; }
+    if (!workspaces.length) { root.append(el('p', { class: 'muted' }, 'No workspaces yet — create one to get started. You can connect it to a GitHub repo now or later. New to PathCurator? ', el('a', { href: '#/help/first-pathway' }, 'Read the five-minute guide'), '.')); return; }
     for (const { ws, items } of byWs.values()) {
       const section = el('section', { class: 'workspace', 'aria-labelledby': `ws-${ws.id}`,
         style: ws.colour ? `--org-accent:${ws.colour}` : null });

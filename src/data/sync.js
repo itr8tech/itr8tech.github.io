@@ -388,6 +388,64 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     return { ok: true, needsReview: false, applied, plan, ...(legacyOffer ? { legacy: legacyOffer } : {}) };
   }
 
+  // P5: install (or update) the link-audit tooling in the workspace's repo — the checker, the Issue
+  // notifier, and the Action workflow — from THIS app's own served copies, in one atomic commit on
+  // top of head (no force). Files go to the REPO ROOT regardless of the workspace path: the
+  // workflow scans every manifest.json recursively and writes each root's audit/results.json.
+  // Idempotent (unchanged tree → no commit). Tokens without the Workflows permission can't push
+  // .github/workflows/ files — on rejection we retry with just the scripts and report
+  // workflowSkipped so the UI can say what's missing.
+  const AUDIT_TOOLING = [
+    { src: '/audit/audit.mjs', dest: 'audit/audit.mjs' },
+    { src: '/audit/notify.mjs', dest: 'audit/notify.mjs' },
+    { src: '/audit/workflow.yml', dest: '.github/workflows/audit.yml' },
+  ];
+  async function installAuditTooling(wsId) {
+    if (!isPrimary()) throw new Error(READONLY);
+    const ws = await db.getWorkspace(wsId);
+    if (!ws || !ws.owner || !ws.repo) throw new Error('This workspace is not connected to a repo.');
+    const token = await db.getWorkspacePat(wsId);
+    if (!token) throw new Error('No access token is stored for this workspace.');
+    const client = makeClient(ws, token);
+    const ref = await client.getRef();
+    if (!ref) throw new Error('Commit the workspace first — the repository is empty.');
+    const baseCommit = await client.getCommit(ref.sha);
+
+    const files = [];
+    for (const f of AUDIT_TOOLING) {
+      const res = await fetch(f.src);
+      if (!res.ok) throw new Error(`Could not load ${f.src} from the app.`);
+      files.push({ ...f, content: await res.text() });
+    }
+
+    const push = async (list) => {
+      const entries = [];
+      for (const f of list)
+        entries.push({ path: f.dest, mode: '100644', type: 'blob', sha: await client.createBlob({ content: f.content, encoding: 'utf-8' }) });
+      const treeSha = await client.createTree({ baseTreeSha: baseCommit.treeSha, entries });
+      if (treeSha === baseCommit.treeSha) return { upToDate: true };
+      const commitSha = await client.createCommit({ message: 'Add PathCurator link-audit workflow', treeSha, parents: [ref.sha] });
+      await client.updateRef({ sha: commitSha, force: false });
+      return { commitSha };
+    };
+
+    let result;
+    try { result = await push(files); }
+    catch (e) {
+      // Most likely the token can't write workflow files (403; message varies by token type).
+      // Retry with just the scripts; if THAT also fails, the original error was something else.
+      let retry;
+      try { retry = await push(files.filter((f) => !f.dest.startsWith('.github/'))); }
+      catch { throw e; }
+      result = { ...retry, workflowSkipped: true };
+    }
+    // Our own commit moved the remote; advance the sync baseline so the user's next commit doesn't
+    // trip the remote-ahead guard on a change we made ourselves. (Pathway files are untouched.)
+    if (result.commitSha) { try { await pull(wsId, { interactive: false }); } catch { /* best-effort */ } }
+    await refreshOne(wsId);
+    return { ok: true, ...result };
+  }
+
   // P6: import the legacy curator-pathways.json into this (connected, otherwise-empty) workspace.
   // Converted pathways arrive as UNCOMMITTED local content — no sync-state change — so the next
   // commit writes the v2 per-pathway layout into the repo; the legacy file itself is never touched
@@ -515,7 +573,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     init: () => refreshAll(),
     refreshOne, refreshAll,
     handleChange: (evt) => { if (!evt || evt.entity === '*' || ['pathways', 'steps', 'bookmarks', 'workspaces', 'sync'].includes(evt.entity)) refreshAll(); },
-    commit, initialize, pull, resolvePull, importLegacy,
+    commit, initialize, pull, resolvePull, importLegacy, installAuditTooling,
     fetchCommittedPathways, discardLocalChanges,
     getPendingPull: (wsId) => pendingPull.get(wsId) || null,
     getAutoCommit, setAutoCommit, startTimers, stopTimers,

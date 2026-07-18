@@ -147,7 +147,15 @@ export function openConnectRepo({ workspace = null, invoker, ctx }) {
       }
       status.textContent = 'Initializing repository…';
       await ctx.sync.initialize(wsId);
-      announce('Repository connected and initialized.');
+      // P5: a fresh pathways repo gets the link-audit tooling out of the box. Best-effort — a token
+      // without the Workflows permission still gets the scripts (workflowSkipped), and any failure
+      // never blocks the connect; #/audit has an Install/update button to finish later.
+      status.textContent = 'Adding the link-audit workflow…';
+      const audit = await ctx.sync.installAuditTooling(wsId).catch(() => null);
+      announce(audit?.workflowSkipped
+        ? 'Repository initialized. Audit scripts added, but the token can’t write workflow files — grant it the “Workflows” permission and use Install/update on the Audit page.'
+        : audit ? 'Repository connected and initialized with the link-audit workflow.'
+        : 'Repository connected and initialized.');
       dlg.close('ok');
     } catch (ex) {
       err.textContent = friendlyError(ex);

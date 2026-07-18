@@ -94,6 +94,35 @@ export default async function mount(container, params, ctx) {
     for (const d of root.querySelectorAll('details.audit-section')) d.open = open;   // toggle handlers record openState
   };
 
+  // Install/update the GitHub Action tooling into each connected repo. No status probe on render
+  // (that would cost a network round-trip per workspace) — the install itself is idempotent and
+  // reports "already up to date".
+  async function renderWorkflowSection() {
+    const workspaces = (await ctx.db.getWorkspaces()).filter((w) => w.owner && w.repo);
+    if (!workspaces.length) return null;
+    const sec = el('section', { class: 'exempt-section', 'aria-labelledby': 'auditwf-h' });
+    sec.append(el('h2', { id: 'auditwf-h' }, 'Audit workflow'),
+      el('p', { class: 'muted' }, 'The GitHub Action that checks every link weekly and commits audit/results.json for the app to merge. “Install / update” commits the checker scripts and the workflow file into the repository (idempotent — re-run it after app updates to refresh them).'));
+    const list = el('ul', { class: 'exempt-list', role: 'list' });
+    for (const w of workspaces) {
+      const status = el('span', { class: 'muted', role: 'status' });
+      const install = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-audit-install': w.id, style: 'margin-inline-start:auto' }, 'Install / update');
+      install.addEventListener('click', async () => {
+        install.disabled = true; status.textContent = 'installing…';
+        try {
+          const r = await ctx.sync.installAuditTooling(w.id);
+          status.textContent = r.upToDate ? 'already up to date ✓'
+            : r.workflowSkipped ? 'scripts installed — the token can’t write workflow files; grant it the “Workflows” permission and re-run, or add .github/workflows/audit.yml by hand'
+            : 'installed ✓';
+        } catch (e) { status.textContent = e.message || 'Could not install.'; }
+        finally { install.disabled = false; }
+      });
+      list.append(el('li', {}, el('code', {}, `${w.owner}/${w.repo}`), el('span', { class: 'muted' }, ` — ${w.org_label} `), install, status));
+    }
+    sec.append(list);
+    return sec;
+  }
+
   // Link-audit exemptions: domains the auditor skips. Global; committed (audit/config.json) so the
   // Action honours them. Lives HERE with the rest of the audit tooling, not on #/sync.
   async function renderExemptSection() {
@@ -132,7 +161,11 @@ export default async function mount(container, params, ctx) {
 
     if (!flagged.length) {
       root.append(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
-      if (primary) root.append(await renderExemptSection());
+      if (primary) {
+        const wf = await renderWorkflowSection();
+        if (wf) root.append(wf);
+        root.append(await renderExemptSection());
+      }
       return;
     }
     const expand = el('button', { type: 'button', class: 'btn btn--sm' }, 'Expand all');
@@ -148,7 +181,11 @@ export default async function mount(container, params, ctx) {
       if (!items?.length) continue;
       root.append(section(key, label, items, primary));
     }
-    if (primary) root.append(await renderExemptSection());
+    if (primary) {
+      const wf = await renderWorkflowSection();
+      if (wf) root.append(wf);
+      root.append(await renderExemptSection());
+    }
   }
 
   await refresh();

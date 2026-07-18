@@ -10,34 +10,6 @@ export default async function mount(container, params, ctx) {
   container.append(root);
   let unsub = () => {};
   const controller = { title: 'Sync', refresh, destroy() { unsub(); } };
-  const btn = (txt, props, fn) => { const b = el('button', { type: 'button', ...props }, txt); b.addEventListener('click', fn); return b; };
-  const act = async (fn) => { try { await fn(); } catch { /* remove is rarely fallible; add shows inline errors */ } };
-
-  // Link-audit exemptions (P5): domains the auditor skips. Global; committed so the Action honours them.
-  async function renderExemptSection() {
-    const exempt = await ctx.db.listExemptDomains();
-    const sec = el('section', { class: 'exempt-section', 'aria-labelledby': 'exempt-h' });
-    sec.append(el('h2', { id: 'exempt-h' }, 'Link-audit exemptions'),
-      el('p', { class: 'muted' }, 'Domains the link auditor skips — paywalled or auth-walled sites. Committed to the repo so the audit workflow honours them.'));
-    const list = el('ul', { class: 'exempt-list', role: 'list' });
-    if (!exempt.length) list.append(el('li', { class: 'muted' }, 'No exemptions yet.'));
-    for (const e of exempt) list.append(el('li', {},
-      el('code', {}, e.domain), e.reason ? el('span', { class: 'muted' }, ` — ${e.reason}`) : '',
-      btn('Remove', { class: 'btn btn--sm btn--danger', 'data-requires-primary': true, style: 'margin-inline-start:auto' },
-        () => act(() => ctx.db.removeExemptDomain({ domain: e.domain })))));
-    const input = el('input', { type: 'text', name: 'domain', placeholder: 'example.com', 'aria-label': 'Domain to exempt', autocomplete: 'off' });
-    const err = el('span', { class: 'field-error', role: 'alert' });
-    const form = el('form', { class: 'exempt-add' }, input,
-      el('button', { type: 'submit', class: 'btn btn--sm', 'data-requires-primary': true }, 'Add exemption'), err);
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault(); err.textContent = '';
-      try { await ctx.db.addExemptDomain({ domain: input.value }); input.value = ''; }
-      catch (ex) { err.textContent = ex.message || 'Could not add.'; }
-    });
-    sec.append(list, form);
-    return sec;
-  }
-
   async function refresh() {
     const [workspaces, pathways] = await Promise.all([ctx.db.getWorkspaces(), ctx.db.listPathways()]);
     const nameById = new Map(pathways.map((p) => [p.id, p.name]));
@@ -93,7 +65,6 @@ export default async function mount(container, params, ctx) {
       list.append(card);
     }
     root.append(list);
-    if (primary) root.append(await renderExemptSection());
   }
 
   // Live-update when the global conflict state flips. Ordinary count changes (edit/commit/pull)

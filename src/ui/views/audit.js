@@ -94,6 +94,33 @@ export default async function mount(container, params, ctx) {
     for (const d of root.querySelectorAll('details.audit-section')) d.open = open;   // toggle handlers record openState
   };
 
+  // Link-audit exemptions: domains the auditor skips. Global; committed (audit/config.json) so the
+  // Action honours them. Lives HERE with the rest of the audit tooling, not on #/sync.
+  async function renderExemptSection() {
+    const exempt = await ctx.db.listExemptDomains();
+    const sec = el('section', { class: 'exempt-section', 'aria-labelledby': 'exempt-h' });
+    sec.append(el('h2', { id: 'exempt-h' }, 'Link-audit exemptions'),
+      el('p', { class: 'muted' }, 'Domains the link auditor skips — paywalled or auth-walled sites. Committed to the repo so the audit workflow honours them.'));
+    const list = el('ul', { class: 'exempt-list', role: 'list' });
+    if (!exempt.length) list.append(el('li', { class: 'muted' }, 'No exemptions yet.'));
+    for (const e of exempt) {
+      const rm = el('button', { type: 'button', class: 'btn btn--sm btn--danger', 'data-requires-primary': true, style: 'margin-inline-start:auto' }, 'Remove');
+      rm.addEventListener('click', () => act(() => ctx.db.removeExemptDomain({ domain: e.domain })));
+      list.append(el('li', {}, el('code', {}, e.domain), e.reason ? el('span', { class: 'muted' }, ` — ${e.reason}`) : '', rm));
+    }
+    const input = el('input', { type: 'text', name: 'domain', placeholder: 'example.com', 'aria-label': 'Domain to exempt', autocomplete: 'off' });
+    const err = el('span', { class: 'field-error', role: 'alert' });
+    const form = el('form', { class: 'exempt-add' }, input,
+      el('button', { type: 'submit', class: 'btn btn--sm', 'data-requires-primary': true }, 'Add exemption'), err);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault(); err.textContent = '';
+      try { await ctx.db.addExemptDomain({ domain: input.value }); input.value = ''; }
+      catch (ex) { err.textContent = ex.message || 'Could not add.'; }
+    });
+    sec.append(list, form);
+    return sec;
+  }
+
   async function refresh() {
     const flagged = await ctx.db.listFlaggedBookmarks();
     const primary = ctx.isPrimary();
@@ -105,6 +132,7 @@ export default async function mount(container, params, ctx) {
 
     if (!flagged.length) {
       root.append(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
+      if (primary) root.append(await renderExemptSection());
       return;
     }
     const expand = el('button', { type: 'button', class: 'btn btn--sm' }, 'Expand all');
@@ -120,6 +148,7 @@ export default async function mount(container, params, ctx) {
       if (!items?.length) continue;
       root.append(section(key, label, items, primary));
     }
+    if (primary) root.append(await renderExemptSection());
   }
 
   await refresh();

@@ -196,6 +196,22 @@
   .tt-wrap--end .tt{ left:auto; right:0; }   /* right-edge toolbars: keep the tip on-screen */
   .theme-toggle__icon{ font-size:1.05rem; line-height:1; }
   @media (prefers-reduced-motion:reduce){ .tt{ transition:none; } }
+  /* markdown editor (Write/Preview + toolbar around a plain textarea) */
+  .md-field{ display:grid; gap:var(--space-2); }
+  .md-editor{ border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  .md-bar{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-2);
+    padding:var(--space-1) var(--space-2); background:var(--surface-inset); border-bottom:1px solid var(--border); }
+  .md-tabs{ display:inline-flex; gap:2px; }
+  .md-tab{ font-size:.8rem; font-weight:550; padding:.2em .7em; border:1px solid transparent; border-radius:var(--radius-sm);
+    background:transparent; }
+  .md-tab[aria-pressed="true"]{ background:var(--surface); border-color:var(--border-strong); }
+  .md-tools{ display:inline-flex; gap:2px; }
+  .md-tool{ font-size:.85rem; min-width:1.9rem; padding:.15em .45em; border-color:transparent; background:transparent; }
+  .md-tool:hover{ border-color:var(--border-strong); background:var(--surface); }
+  .md-editor .md-input{ border:none; border-radius:0; display:block; }
+  .md-editor .md-input:focus-visible{ outline-offset:-3px; }
+  .md-preview{ padding:var(--space-2) var(--space-3); min-height:4.5rem; background:var(--surface); }
+
   /* P7: required/bonus grouping — subtle: a small-caps label + solid vs dashed left rule */
   .bm-group-label{ font-size:.72rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
     color:var(--muted); margin:var(--space-3) 0 var(--space-1); }

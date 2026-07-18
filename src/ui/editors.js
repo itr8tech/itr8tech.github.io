@@ -1,6 +1,7 @@
 // src/ui/editors.js — native <dialog> editors (no innerHTML with user data). The change event
 // drives the list re-render; editors never patch list DOM. Every mutating control is data-requires-primary.
 import { el } from './dom.js';
+import { mdField } from './md-editor.js';
 import { announce } from './a11y.js';
 
 function mountDialog(dlg, invoker) {
@@ -48,8 +49,8 @@ export function openBookmarkEditor({ stepId, bm = null, invoker, ctx }) {
     el('h2', { id: 'bm-h', 'data-view-heading': true, tabindex: -1 }, isEdit ? 'Edit link' : 'Add link'),
     el('label', {}, 'Title', title),
     el('label', {}, 'URL (required)', url, urlErr),
-    el('label', {}, 'Description', desc),
-    el('label', {}, 'Context', context),
+    mdField(desc, 'Description'),
+    mdField(context, 'Context'),
     el('fieldset', {}, el('legend', {}, 'Requirement'), radio('required', '1', req === 1, 'Required'), radio('required', '0', req === 0, 'Bonus')),
     el('fieldset', {}, el('legend', {}, 'Content type'), ...['Read', 'Watch', 'Listen', 'Participate'].map((t) => radio('content_type', t, ct === t, t))),
     formErr,
@@ -83,8 +84,8 @@ export function openStepEditor({ pathwayId, step = null, invoker, ctx }) {
   const form = el('form', { novalidate: true, 'aria-labelledby': 'step-h' },
     el('h2', { id: 'step-h', 'data-view-heading': true, tabindex: -1 }, isEdit ? 'Edit step' : 'Add step'),
     el('label', {}, 'Name (required)', name, nameErr),
-    el('label', {}, 'Objective', objective),
-    el('label', {}, 'Pause and reflect', par),
+    mdField(objective, 'Objective'),
+    mdField(par, 'Pause and reflect'),
     formErr,
     el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Cancel'), submit));
   form.querySelector('.form-actions .btn').addEventListener('click', () => dlg.close('cancel'));
@@ -139,9 +140,9 @@ export function openPathwayEditor({ workspaceId = null, pathway = null, invoker,
   const form = el('form', { novalidate: true, 'aria-labelledby': 'pw-h' },
     el('h2', { id: 'pw-h', 'data-view-heading': true, tabindex: -1 }, isEdit ? 'Edit pathway' : 'New pathway'),
     el('label', {}, 'Name (required)', name, nameErr),
-    el('label', {}, 'Description', description),
-    el('label', {}, 'Content warning', cw),
-    el('label', {}, 'Acknowledgments', ack),
+    mdField(description, 'Description'),
+    mdField(cw, 'Content warning'),
+    mdField(ack, 'Acknowledgments'),
     imageField,
     formErr,
     el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Cancel'), submit));

@@ -143,7 +143,9 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
       const sha = await client.createBlob({ content: ser.manifestBytes, encoding: 'utf-8' });
       entries.push({ path: joinPath(P, 'manifest.json'), mode: '100644', type: 'blob', sha });
     }
-    for (const del of ser.deletions) entries.push({ path: joinPath(P, del), sha: null });
+    // Deletion entries STILL require mode+type — the real Trees API rejects a bare
+    // { path, sha:null } with "Must supply a valid tree.mode".
+    for (const del of ser.deletions) entries.push({ path: joinPath(P, del), mode: '100644', type: 'blob', sha: null });
     let ovBlobSha = null;
     if (ovChanged) {
       ovBlobSha = await client.createBlob({

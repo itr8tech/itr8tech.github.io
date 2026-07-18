@@ -12,6 +12,7 @@ export const LEGACY_FILE = 'curator-pathways.json';
 
 const CT = { read: 'Read', watch: 'Watch', listen: 'Listen', participate: 'Participate' };
 const contentType = (v) => CT[String(v ?? '').trim().toLowerCase()] || 'Read';
+export const canonicalContentType = contentType;   // shared by the CSV importer
 const ts = (v) => {
   if (v == null || v === '') return null;
   const n = Number(v);

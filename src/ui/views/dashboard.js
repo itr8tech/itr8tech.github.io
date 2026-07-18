@@ -46,12 +46,12 @@ export default async function mount(container, params, ctx) {
     clear(root);
     root.append(el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Pathways'));
     if (primary) {
-      const fileInput = el('input', { type: 'file', accept: 'application/json,.json', hidden: true, 'data-import-input': true });
+      const fileInput = el('input', { type: 'file', accept: 'application/json,.json,text/csv,.csv,text/html,.html', hidden: true, 'data-import-input': true });
       fileInput.addEventListener('change', () => { importFile(fileInput.files?.[0], fileInput); fileInput.value = ''; });
       root.append(el('div', { class: 'dashboard-actions' },
         btn('+ New workspace', { class: 'btn btn--primary', 'data-requires-primary': true, 'data-focus-key': 'new-workspace' },
           (ev) => openConnectRepo({ invoker: ev.currentTarget, ctx })),
-        btn('⬆ Import file…', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': 'import-file', title: 'Import a pathway, workspace, backup, or legacy export (or drag a file onto this page)' },
+        btn('⬆ Import file…', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': 'import-file', title: 'Import a pathway/workspace/backup JSON, legacy export, CSV of links, or browser bookmarks.html (or drag a file onto this page)' },
           () => fileInput.click()),
         btn('⬇ Back up everything', { class: 'btn', 'data-focus-key': 'backup-all' },
           (ev) => doExport('backup', null, ev.currentTarget)),

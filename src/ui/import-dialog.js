@@ -13,6 +13,7 @@ const KIND_LABEL = {
   'pathcurator-pathway': 'Pathway export', 'pathcurator-workspace': 'Workspace export',
   'pathcurator-backup': 'Full backup', 'raw-pathway': 'Committed pathway file',
   'v2-pathway-list': 'Pathway list', legacy: 'Legacy PathCurator export',
+  csv: 'Link spreadsheet (CSV)', bookmarks: 'Browser bookmarks (HTML)',
 };
 
 export async function openImportDialog({ file, invoker, ctx }) {
@@ -31,7 +32,7 @@ export async function openImportDialog({ file, invoker, ctx }) {
 
   let plan;
   try {
-    plan = await planImport(ctx.db, await file.text(), { safeUrl: ctx.md.safeUrl });
+    plan = await planImport(ctx.db, await file.text(), { safeUrl: ctx.md.safeUrl, filename: file.name });
   } catch (e) {
     form.replaceChildren(heading, el('p', { class: 'field-error', role: 'alert' }, e.message || 'Could not read this file.'),
       el('div', { class: 'form-actions' }, closeBtn));

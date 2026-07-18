@@ -97,19 +97,10 @@ export default async function mount(container, params, ctx) {
           onConfirm: async () => { await ctx.db.deletePathway({ id: p.id }); ctx.navigate('#/'); } })),
       btn('+ Step', { class: 'btn', 'data-requires-primary': true, 'data-focus-key': `add-step:${p.id}` },
         (ev) => openStepEditor({ pathwayId: p.id, invoker: ev.currentTarget, ctx })),
-      // P6/P7 exports: read-shaped → usable from a follower tab too
-      btn('⬇ Export file', { class: 'btn', 'data-focus-key': `export-pathway:${p.id}` }, async () => {
-        try {
-          const { buildExportFile } = await import('/src/data/exchange.js');
-          const { downloadFile } = await import('../download.js');
-          const { filename, content } = await buildExportFile(ctx.db, { scope: 'pathway', id: p.id });
-          downloadFile(filename, content);
-          ctx.announce(`Exported ${filename}.`);
-        } catch (e) { ctx.announce(e.message || 'Export failed.', { assertive: true }); }
-      }),
-      btn('🌐 Export web page', { class: 'btn', 'data-focus-key': `export-web:${p.id}`,
-        title: 'A self-contained interactive page for learners — tracks launch progress in their browser' },
-        (ev) => openWebExportDialog({ pathway: p, invoker: ev.currentTarget, ctx }))));
+      // P6/P7 exports (all formats in one dialog): read-shaped → usable from a follower tab too
+      btn('⬇ Export…', { class: 'btn', 'data-focus-key': `export-pathway:${p.id}`,
+        title: 'Export as a data file, interactive web page, spreadsheet, feed, or browser bookmarks' },
+        (ev) => openExportDialog({ pathway: p, invoker: ev.currentTarget, ctx }))));
 
     if (p.steps.length) root.append(el('div', { class: 'steps-toolbar' },
       el('button', { type: 'button', class: 'btn btn--subtle', 'data-collapse-all': 'collapse' }, 'Collapse all')));
@@ -186,20 +177,33 @@ export default async function mount(container, params, ctx) {
   return controller;
 }
 
-// P7: web-page export dialog. Attribution (author name) is OFF by default and remembered as a
-// setting; richer attribution (bio, author link, several fields) is a recorded TODO for later.
-async function openWebExportDialog({ pathway: p, invoker, ctx }) {
+// P7: the one export dialog — five formats over the same canonical shape. Attribution (author
+// name) is OFF by default, remembered as a setting, and applies to the publishing formats (web
+// page / CSV / RSS); the JSON data file always carries full data by design. Richer attribution
+// (bio, author link, several fields) is a recorded TODO for later.
+const EXPORT_FORMATS = [
+  ['json', 'Data file (JSON)', 'full fidelity — for importing into PathCurator'],
+  ['html', 'Web page (HTML)', 'self-contained interactive page for learners, tracks launch progress'],
+  ['csv', 'Spreadsheet (CSV)', 'one row per link — opens in Excel/Sheets, re-importable'],
+  ['rss', 'Feed (RSS)', 'one item per link, for feed readers'],
+  ['bookmarks', 'Browser bookmarks (HTML)', 'import into any browser — a folder per step'],
+];
+async function openExportDialog({ pathway: p, invoker, ctx }) {
   const { el } = await import('../dom.js');
   const saved = (await ctx.db.getSetting('publish_attribution')) === '1';
   const dlg = el('dialog', { class: 'pc-editor' });
   const cb = el('input', { type: 'checkbox', name: 'attribution', checked: saved });
   const err = el('p', { class: 'field-error', role: 'alert' });
   const submit = el('button', { type: 'submit', class: 'btn btn--primary' }, 'Export');
-  const form = el('form', { novalidate: true, 'aria-labelledby': 'webx-h' },
-    el('h2', { id: 'webx-h', 'data-view-heading': true, tabindex: -1 }, 'Export web page'),
-    el('p', { class: 'muted' }, 'A single self-contained HTML file for learners — works offline and tracks their launch progress in their own browser.'),
+  const radios = EXPORT_FORMATS.map(([value, label, hint], i) => {
+    const r = el('input', { type: 'radio', name: 'fmt', value, checked: i === 0 });
+    return el('label', { class: 'export-fmt' }, r, el('span', {}, el('strong', {}, label), ' — ', el('span', { class: 'muted' }, hint)));
+  });
+  const form = el('form', { novalidate: true, 'aria-labelledby': 'exp-h' },
+    el('h2', { id: 'exp-h', 'data-view-heading': true, tabindex: -1 }, `Export — ${p.name}`),
+    el('fieldset', { class: 'export-fmts' }, el('legend', {}, 'Format'), ...radios),
     el('label', { class: 'field-label', style: 'display:flex;gap:.5rem;align-items:center;font-weight:400' }, cb,
-      ' Include author attribution (your name in the byline)'),
+      ' Include author attribution (web page, CSV and RSS)'),
     err,
     el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Cancel'), submit));
   form.querySelector('.form-actions .btn').addEventListener('click', () => dlg.close('cancel'));
@@ -207,12 +211,35 @@ async function openWebExportDialog({ pathway: p, invoker, ctx }) {
     e.preventDefault(); err.textContent = '';
     submit.disabled = true; dlg.setAttribute('aria-busy', 'true');
     try {
-      if (ctx.isPrimary()) await ctx.db.setSetting('publish_attribution', cb.checked ? '1' : '0').catch(() => {});
-      const { buildPathwayHtml } = await import('../publish-html.js');
+      const fmt = form.querySelector('input[name="fmt"]:checked')?.value || 'json';
+      const attribution = cb.checked;
+      if (ctx.isPrimary()) await ctx.db.setSetting('publish_attribution', attribution ? '1' : '0').catch(() => {});
       const { downloadFile } = await import('../download.js');
-      const { filename, content } = await buildPathwayHtml(ctx.db, { id: p.id, attribution: cb.checked });
-      downloadFile(filename, content, 'text/html;charset=utf-8');
-      ctx.announce(`Exported ${filename}.`);
+      let out, mime = 'application/json';
+      if (fmt === 'json') {
+        const { buildExportFile } = await import('/src/data/exchange.js');
+        out = await buildExportFile(ctx.db, { scope: 'pathway', id: p.id });
+      } else if (fmt === 'html') {
+        const { buildPathwayHtml } = await import('../publish-html.js');
+        out = await buildPathwayHtml(ctx.db, { id: p.id, attribution });
+        mime = 'text/html;charset=utf-8';
+      } else if (fmt === 'csv') {
+        const { buildPathwayCsv } = await import('../publish-feeds.js');
+        out = await buildPathwayCsv(ctx.db, { id: p.id, attribution });
+        mime = 'text/csv;charset=utf-8';
+      } else if (fmt === 'rss') {
+        const { buildPathwayRss } = await import('../publish-feeds.js');
+        const ws = p.workspace_id ? await ctx.db.getWorkspace(p.workspace_id).catch(() => null) : null;
+        const siteUrl = ws?.owner && ws?.repo ? `https://github.com/${ws.owner}/${ws.repo}` : null;
+        out = await buildPathwayRss(ctx.db, { id: p.id, attribution, siteUrl });
+        mime = 'application/rss+xml;charset=utf-8';
+      } else {
+        const { buildPathwayBookmarks } = await import('/src/data/netscape.js');
+        out = await buildPathwayBookmarks(ctx.db, { id: p.id });
+        mime = 'text/html;charset=utf-8';
+      }
+      downloadFile(out.filename, out.content, mime);
+      ctx.announce(`Exported ${out.filename}.`);
       dlg.close('ok');
     } catch (ex) { err.textContent = ex.message || 'Export failed.'; submit.disabled = false; }
     finally { dlg.removeAttribute('aria-busy'); }

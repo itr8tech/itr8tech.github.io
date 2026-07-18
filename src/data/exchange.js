@@ -7,7 +7,7 @@
 // as warnings, unavailable header image → null) so "identical" and idempotent re-import are real.
 // The worker re-verifies image hashes independently (defense in depth).
 import { contentHash } from './canonical.js';
-import { convertLegacyPathways } from './legacy.js';
+import { convertLegacyPathways, canonicalContentType } from './legacy.js';
 
 const PARSE_CAP = 50 * 1024 * 1024;      // raw file text
 const PATHWAY_CAP = 500;                 // per import (backup kind exempt)
@@ -83,6 +83,80 @@ export function detectKind(json) {
   throw new Error('Not a recognized PathCurator file (expected a pathway/workspace/backup export, a committed pathway file, or a legacy curator-pathways.json).');
 }
 
+// ============================== CSV import ==============================
+// Round-trips our own CSV export and accepts any sheet with a URL column (optional Step/Title/
+// Type/Required/Description/Context/Added columns). The export's formula-injection guard
+// (leading apostrophe before =+-@) is stripped back off, so round trips are faithful.
+function stripBom(t) { return t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t; }
+export function parseCsv(text) {
+  const rows = []; let row2 = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row2.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row2.push(field); field = '';
+      if (row2.length > 1 || row2[0] !== '') rows.push(row2);
+      row2 = [];
+    } else field += c;
+  }
+  if (field !== '' || row2.length) { row2.push(field); rows.push(row2); }
+  return rows;
+}
+const unguard = (s) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s);
+export function looksLikeCsv(text) {
+  const first = stripBom(String(text)).split(/\r?\n/, 1)[0] || '';
+  return /^"?Pathway Name"?,/i.test(first) || (first.includes(',') && /(^|,)\s*"?(url|link)"?\s*(,|$)/i.test(first));
+}
+export function csvToPathways(text, { fallbackName = 'Imported links' } = {}) {
+  const rows = parseCsv(stripBom(String(text))).map((r) => r.map(unguard));
+  let name = fallbackName, description = '', contentWarning = '';
+  const hi = rows.findIndex((r) => r.some((c) => /^(url|link)$/i.test(c.trim())));
+  if (hi === -1) throw new Error('No URL column found in the CSV.');
+  for (let i = 0; i < hi; i++) {
+    const k = (rows[i][0] || '').trim().toLowerCase(), v = rows[i][1] || '';
+    if (k === 'pathway name' && v) name = v;
+    else if (k === 'pathway description') description = v;
+    else if (k === 'content warning') contentWarning = v;
+  }
+  const header = rows[hi].map((c) => c.trim().toLowerCase());
+  const col = (n) => header.indexOf(n);
+  const iStep = col('step'), iTitle = col('title'), iType = col('type'), iReq = col('required'),
+    iDesc = col('description'), iCtx = col('context'), iAdded = col('added'),
+    iUrl = header.findIndex((c) => c === 'url' || c === 'link');
+  const stepMap = new Map();
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const url = (iUrl >= 0 ? r[iUrl] : '')?.trim();
+    if (!url) continue;
+    const stepName = (iStep >= 0 && r[iStep]?.trim()) ? r[iStep].trim() : 'Links';
+    if (!stepMap.has(stepName)) stepMap.set(stepName, []);
+    const added = iAdded >= 0 && r[iAdded] ? Date.parse(r[iAdded]) : NaN;
+    stepMap.get(stepName).push({
+      title: (iTitle >= 0 && r[iTitle]) || url, url,
+      content_type: canonicalContentType(iType >= 0 ? r[iType] : ''),
+      required: iReq >= 0 && r[iReq] ? (/^(required|yes|y|true|1)$/i.test(r[iReq].trim()) ? 1 : 0) : 1,
+      description: (iDesc >= 0 && r[iDesc]) || '', context: (iCtx >= 0 && r[iCtx]) || '',
+      added_at: Number.isFinite(added) ? added : null,
+    });
+  }
+  if (![...stepMap.values()].some((v) => v.length)) throw new Error('The CSV contains no links.');
+  const id = `csv--${slugify(name)}`;
+  const steps = [...stepMap.entries()].map(([stepName, items], si) => ({
+    id: `${id}-s${si}`, name: stepName, objective: '', pause_and_reflect: '', sort_order: si,
+    bookmarks: items.map((b, bi) => ({ id: `${id}-s${si}-b${bi}`, sort_order: bi, ...b })),
+  }));
+  return { pathways: [{ schemaVersion: 1, pathway: {
+    id, name, description, content_warning: contentWarning, acknowledgments: '', sort_order: 0,
+    created_at: null, last_updated: null, version: null, created_by: null, modified_by: null,
+    header_image: null, version_history: [], extra: {}, steps,
+  } }], images: {} };
+}
+
 // ============================== PLAN ==============================
 // Normalize an incoming pathway EXACTLY the way materializePathway will, so the classification
 // hash matches what the DB would hold after import (→ honest "identical", idempotent re-import).
@@ -105,17 +179,25 @@ function normalizeIncoming(pw, imageShas, safeUrl, warnings) {
 
 // → { kind, items, images, warnings, workspaceMeta?, groups?, exemptDomains?, overridesByGroup? }
 // items: [{ id, name, pathway (normalized wrap), hash, existsIn: wsId|null, existsInLabel, localHash }]
-export async function planImport(db, text, { safeUrl }) {
+export async function planImport(db, text, { safeUrl, filename = '' } = {}) {
   if (typeof text !== 'string' || text.length > PARSE_CAP) throw new Error('File is too large to import (50 MB cap).');
-  let json;
-  try { json = JSON.parse(text); } catch { throw new Error('Not valid JSON — is this the right file?'); }
-  const { kind } = detectKind(json);
+  const fallbackName = String(filename).replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim() || 'Imported links';
+  let json = null, alt = null;
+  try { json = JSON.parse(text); } catch {
+    // Non-JSON inputs: a browser bookmarks.html (Netscape format) or a CSV of links.
+    const { looksLikeNetscape, parseNetscapeBookmarks } = await import('./netscape.js');
+    if (looksLikeNetscape(text)) alt = { kind: 'bookmarks', ...parseNetscapeBookmarks(text, { fallbackName }) };
+    else if (looksLikeCsv(text)) alt = { kind: 'csv', ...csvToPathways(text, { fallbackName }) };
+    else throw new Error('Not a recognized file — expected a PathCurator JSON export, a legacy curator-pathways.json, a CSV of links, or a browser bookmarks.html.');
+  }
+  const kind = alt ? alt.kind : detectKind(json).kind;
 
   // Assemble the raw pathway list (+ per-group metadata for workspace/backup kinds).
   let images = {};
   const groups = [];         // [{ workspace: {slug, orgLabel, colour, repo?}, pathwayIds: [], overrides }]
   let list = [];
-  if (kind === 'pathcurator-pathway') { list = [{ pathway: json.pathway }]; images = json.images || {}; }
+  if (alt) { list = alt.pathways; }
+  else if (kind === 'pathcurator-pathway') { list = [{ pathway: json.pathway }]; images = json.images || {}; }
   else if (kind === 'raw-pathway') list = [{ pathway: json.pathway }];
   else if (kind === 'v2-pathway-list') list = json.map((e) => ({ pathway: e.pathway }));
   else if (kind === 'pathcurator-workspace') {

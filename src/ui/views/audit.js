@@ -5,6 +5,7 @@
 // eventually re-flagged; pinned ones never do (mergeAuditResults enforces both). Overrides commit to
 // audit/overrides.json, so they travel between devices and the audit workflow skips them.
 import { el, clear } from '../dom.js';
+import { confirmDelete } from '../editors.js';
 
 function relTime(ts) {
   if (!ts) return '';
@@ -75,8 +76,15 @@ export default async function mount(container, params, ctx) {
       el('div', { class: 'audit-row__meta muted' },
         el('a', { href: `#/pathway/${encodeURIComponent(b.pathway_id)}` }, b.pathway_name),
         ` · ${b.workspace || 'local'} · ${status}${b.override ? ` · ${overrideNote(b)}` : (b.check_method ? ` · ${b.check_method}` : '')} · ${relTime(b.last_checked)}`));
-    if (primary) li.append(el('div', { class: 'audit-row__actions' },
-      ACTIONS.map(([status2, label, tip]) => ttButton(label, tip, () => act(() => ctx.db.setBookmarkAuditStatus({ id: b.id, status: status2 }))))));
+    if (primary) {
+      const rm = ttButton('🗑 Remove', 'Remove this link from its pathway — deletes the bookmark. Arrives as an uncommitted change you can review before committing.',
+        (e) => confirmDelete({ noun: 'bookmark', name: b.title || b.url, invoker: e.currentTarget,
+          onConfirm: () => ctx.db.deleteBookmark({ id: b.id }) }));
+      rm.querySelector('button').classList.add('btn--danger');
+      li.append(el('div', { class: 'audit-row__actions' },
+        ACTIONS.map(([status2, label, tip]) => ttButton(label, tip, () => act(() => ctx.db.setBookmarkAuditStatus({ id: b.id, status: status2 })))),
+        rm));
+    }
     return li;
   }
 
@@ -85,7 +93,7 @@ export default async function mount(container, params, ctx) {
       el('h2', { class: 'audit-section__title' }, `${label} (${items.length})`));
     const list = el('ul', { class: 'audit-list', role: 'list' });
     for (const b of items) list.append(row(b, primary));
-    const d = el('details', { class: 'audit-section', open: openState[key] !== false }, sum, list);
+    const d = el('details', { class: 'audit-section', open: openState[key] === true }, sum, list);   // collapsed by default
     d.addEventListener('toggle', () => { openState[key] = d.open; });
     return d;
   }
@@ -98,9 +106,13 @@ export default async function mount(container, params, ctx) {
   // repo (async, after paint), so it survives re-renders and is truthful across devices: not
   // installed → installed-waiting-on-first-run → active (results committed).
   const statusText = (s) => !s.workflow && !s.scripts ? 'not installed'
+    : s.workflow && s.current === false ? (s.hasResults ? 'active — update available' : 'installed — update available')
     : s.workflow && s.hasResults ? 'active — audit results committed ✓'
     : s.workflow ? 'installed — waiting for the first audit run'
     : 'scripts only — workflow file missing (the token needs the “Workflows” permission)';
+  // The button earns its place only when there is something to do: not installed, scripts-only,
+  // or the committed copies drifted behind the app's ("Update"). Fully installed + current → no button.
+  const needsButton = (s) => !s.workflow || !s.scripts || s.current === false;
   async function renderWorkflowSection() {
     const workspaces = (await ctx.db.getWorkspaces()).filter((w) => w.owner && w.repo);
     if (!workspaces.length) return null;
@@ -110,10 +122,14 @@ export default async function mount(container, params, ctx) {
     const list = el('ul', { class: 'exempt-list', role: 'list' });
     for (const w of workspaces) {
       const status = el('span', { class: 'muted', role: 'status' }, 'checking…');
+      const install = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-audit-install': w.id, style: 'margin-inline-start:auto', hidden: true }, 'Install / update');
       const probe = () => ctx.sync.auditToolingStatus(w.id)
-        .then((s) => { status.textContent = statusText(s); })
-        .catch(() => { status.textContent = 'status unavailable'; });
-      const install = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-audit-install': w.id, style: 'margin-inline-start:auto' }, 'Install / update');
+        .then((s) => {
+          status.textContent = statusText(s);
+          install.hidden = !needsButton(s);
+          install.textContent = s.current === false ? 'Update' : 'Install / update';
+        })
+        .catch(() => { status.textContent = 'status unavailable'; install.hidden = false; });
       install.addEventListener('click', async () => {
         install.disabled = true; status.textContent = 'installing…';
         try {
@@ -122,6 +138,7 @@ export default async function mount(container, params, ctx) {
             ? 'scripts installed — the token can’t write workflow files; grant it the “Workflows” permission and re-run, or add .github/workflows/audit.yml by hand'
             : r.dispatched ? 'installed — first audit run started; results arrive on a future pull ✓'
             : 'installed — couldn’t start the run (token may need “Actions” permission); trigger it from the repo’s Actions tab';
+          if (!r.workflowSkipped) install.hidden = true;   // done — the probe on the next render agrees
         } catch (e) { status.textContent = e.message || 'Could not install.'; }
         finally { install.disabled = false; }
       });

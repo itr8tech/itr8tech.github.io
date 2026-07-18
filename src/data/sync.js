@@ -458,7 +458,9 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
 
   // Truthful tooling status for the #/audit section — probed from the repo, so it's correct across
   // devices and re-renders: is the workflow committed, are the scripts there, has a results file
-  // ever been produced ("waiting on the first audit" vs "active")?
+  // ever been produced ("waiting on the first audit" vs "active") — and when fully installed, are
+  // the committed copies CURRENT vs this app's own files (drift → the UI shows an Update button;
+  // no drift → no button at all).
   async function auditToolingStatus(wsId) {
     const ws = await db.getWorkspace(wsId);
     if (!ws || !ws.owner || !ws.repo) throw new Error('This workspace is not connected to a repo.');
@@ -466,12 +468,23 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     if (!token) throw new Error('No access token is stored for this workspace.');
     const client = makeClient(ws, token);
     const br = ws.branch || 'main';
-    const [wf, scripts, results] = await Promise.all([
-      client.headFile(ws.owner, ws.repo, '.github/workflows/audit.yml', br),
-      client.headFile(ws.owner, ws.repo, 'audit/audit.mjs', br),
-      client.headFile(ws.owner, ws.repo, joinPath(ws.path || '', 'audit/results.json'), br),
-    ]);
-    return { ok: true, workflow: wf.exists, scripts: scripts.exists, hasResults: results.exists };
+    const heads = {};
+    for (const f of AUDIT_TOOLING) heads[f.dest] = await client.headFile(ws.owner, ws.repo, f.dest, br);
+    const results = await client.headFile(ws.owner, ws.repo, joinPath(ws.path || '', 'audit/results.json'), br);
+    const workflow = heads['.github/workflows/audit.yml'].exists;
+    const scripts = heads['audit/audit.mjs'].exists && heads['audit/notify.mjs'].exists;
+    let current = null;                                    // null = not applicable (not fully installed)
+    if (workflow && scripts) {
+      current = true;
+      try {
+        for (const f of AUDIT_TOOLING) {
+          const repoText = new TextDecoder().decode(await client.getBlobBytes(heads[f.dest].sha));
+          const res = await fetch(f.src);
+          if (!res.ok || repoText !== await res.text()) { current = false; break; }
+        }
+      } catch { current = null; }                          // comparison failed → unknown, not "drifted"
+    }
+    return { ok: true, workflow, scripts, hasResults: results.exists, current };
   }
 
   // P6: import the legacy curator-pathways.json into this (connected, otherwise-empty) workspace.

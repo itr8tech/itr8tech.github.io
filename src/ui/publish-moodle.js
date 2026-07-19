@@ -28,7 +28,8 @@ async function sha1hex(bytes) {
 
 // Arbitrary-but-consistent internal ids (restore remaps everything anyway).
 const ID = { course: 101, courseCtx: 1000, sysCtx: 1, category: 1, module: 200, section: 300,
-  moduleCtx: 401, scorm: 500, scoOrg: 600, scoItem: 601, gradeItem: 700, filePkg: 1, fileDir: 2 };
+  moduleCtx: 401, scorm: 500, scoOrg: 600, scoItem: 601, gradeItem: 700,
+  filePkg: 1, filePkgDir: 2, fileManifest: 3, fileIndex: 4, fileContentDir: 5 };
 
 const MOODLE_VERSION = '2021051700';            // 3.11 — the compatibility floor
 const MOODLE_RELEASE = '3.11';
@@ -39,8 +40,16 @@ export async function buildPathwayMoodleCourse(db, { id, attribution = false }) 
   const sid = scormIdentifier(pkg.meta.id);
   const title = xmlEsc(name || 'Pathway');
   const now = Math.floor(Date.now() / 1000);
+  const enc = new TextEncoder();
+  // The player serves from mod_scorm's EXTRACTED copy (filearea "content"), not from the zip —
+  // and our pre-registered sha1hash tells Moodle "already extracted", so it never unpacks the
+  // package itself. A real backup carries both; so must we (learned from a live 404).
+  const manifestBytes = enc.encode(pkg.parts.manifest);
+  const indexBytes = enc.encode(pkg.parts.html);
   const pkgHash = await sha1hex(pkg.content);
-  const siteHash = await sha1hex(new TextEncoder().encode('pathcurator'));
+  const manifestHash = await sha1hex(manifestBytes);
+  const indexHash = await sha1hex(indexBytes);
+  const siteHash = await sha1hex(enc.encode('pathcurator'));
   const backupId = pkgHash.slice(0, 32);
   const pkgName = xmlEsc(pkg.filename);
   const mbzName = `backup-pathcurator-${slug}.mbz`;
@@ -115,13 +124,15 @@ ${[['filename', mbzName], ['imscc11', 0], ['users', 0], ['anonymize', 0], ['role
 </moodle_backup>
 `;
 
-  // File pool records: the package + the "." directory record. Restore only copies files that an
-  // inforef references — both ids appear in the activity's inforef.xml below.
-  const fileRec = (fid, hash, filename, size, mime) => `  <file id="${fid}">
+  // File pool records: the package zip (filearea "package") AND its extracted contents (filearea
+  // "content" — what the player actually serves), each filearea with its "." directory record.
+  // Restore only copies files that an inforef references — every id appears in the activity's
+  // inforef.xml below.
+  const fileRec = (fid, area, hash, filename, size, mime) => `  <file id="${fid}">
     <contenthash>${hash}</contenthash>
     <contextid>${ID.moduleCtx}</contextid>
     <component>mod_scorm</component>
-    <filearea>package</filearea>
+    <filearea>${area}</filearea>
     <itemid>0</itemid>
     <filepath>/</filepath>
     <filename>${filename}</filename>
@@ -140,8 +151,11 @@ ${[['filename', mbzName], ['imscc11', 0], ['users', 0], ['anonymize', 0], ['role
     <reference>${NULLV}</reference>
   </file>`;
   const filesXml = XMLH + `<files>
-${fileRec(ID.filePkg, pkgHash, pkgName, pkg.content.length, 'application/zip')}
-${fileRec(ID.fileDir, EMPTY_SHA1, '.', 0, NULLV)}
+${fileRec(ID.filePkg, 'package', pkgHash, pkgName, pkg.content.length, 'application/zip')}
+${fileRec(ID.filePkgDir, 'package', EMPTY_SHA1, '.', 0, NULLV)}
+${fileRec(ID.fileManifest, 'content', manifestHash, 'imsmanifest.xml', manifestBytes.length, 'application/xml')}
+${fileRec(ID.fileIndex, 'content', indexHash, 'index.html', indexBytes.length, 'text/html')}
+${fileRec(ID.fileContentDir, 'content', EMPTY_SHA1, '.', 0, NULLV)}
 </files>
 `;
 
@@ -345,7 +359,10 @@ ${fileRec(ID.fileDir, EMPTY_SHA1, '.', 0, NULLV)}
   const activityInforef = XMLH + `<inforef>
   <fileref>
     <file><id>${ID.filePkg}</id></file>
-    <file><id>${ID.fileDir}</id></file>
+    <file><id>${ID.filePkgDir}</id></file>
+    <file><id>${ID.fileManifest}</id></file>
+    <file><id>${ID.fileIndex}</id></file>
+    <file><id>${ID.fileContentDir}</id></file>
   </fileref>
 </inforef>
 `;
@@ -377,6 +394,8 @@ ${fileRec(ID.fileDir, EMPTY_SHA1, '.', 0, NULLV)}
     { name: `${A}/roles.xml`, data: emptyRoles },
     { name: `${A}/inforef.xml`, data: activityInforef },
     { name: `files/${pkgHash.slice(0, 2)}/${pkgHash}`, data: pkg.content },
+    { name: `files/${manifestHash.slice(0, 2)}/${manifestHash}`, data: manifestBytes },
+    { name: `files/${indexHash.slice(0, 2)}/${indexHash}`, data: indexBytes },
     { name: `files/${EMPTY_SHA1.slice(0, 2)}/${EMPTY_SHA1}`, data: new Uint8Array(0) },
   ];
 

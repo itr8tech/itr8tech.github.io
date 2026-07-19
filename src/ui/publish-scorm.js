@@ -64,12 +64,14 @@ export function scormManifest({ id, name, version }) {
 
 export async function buildPathwayScorm(db, { id, attribution = false }) {
   const page = await buildPathwayHtml(db, { id, attribution });
+  const manifest = scormManifest(page.meta);
   return {
     content: buildZip([
-      { name: 'imsmanifest.xml', data: scormManifest(page.meta) },
+      { name: 'imsmanifest.xml', data: manifest },
       { name: 'index.html', data: page.content },
     ]),
     filename: `${page.meta.slug}--scorm--${today()}.zip`,
     meta: page.meta,                              // for wrappers (the Moodle starter course)
+    parts: { manifest, html: page.content },      // the Moodle backup must ALSO carry these extracted
   };
 }

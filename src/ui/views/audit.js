@@ -42,6 +42,12 @@ function overrideNote(b) {
   if (b.override === 'soft') return b.days_left > 0 ? `re-checks in ${b.days_left}d` : 'expired · re-scans next audit';
   return '';
 }
+// MODULE-scope extension-audit run state: every chunk merge fires a change event that re-renders
+// this whole view, which used to wipe the "checked N of M…" status and re-enable the button
+// mid-run. State living here survives re-renders (and remounts), so the section always shows the
+// truth: running → progress text + disabled button.
+const runningAudits = new Map();   // key (wsId | 'local') → { done, total }
+
 // Instant, focus-friendly tooltips (title= takes ~1s to appear and never shows on focus).
 const ACTIONS = [
   ['good', '✓ Good', 'Verified good: trust this link for 90 days, then the auditor re-checks it automatically. Use for false positives you’re fairly sure about.'],
@@ -168,16 +174,33 @@ export default async function mount(container, params, ctx) {
       el('p', { class: 'muted' }, 'Checks every link from THIS browser — including intranet links CI can’t reach. Results apply on this device only (the committed results file stays with the workflow). Exempted and pinned/verified links are skipped.'));
     const list = el('ul', { class: 'exempt-list', role: 'list' });
     for (const t of targets) {
-      const status = el('span', { class: 'muted', role: 'status' });
-      const run = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-ext-audit': t.id ?? 'local', style: 'margin-inline-start:auto' }, '🔎 Audit now');
+      const key = t.id ?? 'local';
+      const running = runningAudits.get(key);
+      const status = el('span', { class: 'muted', role: 'status' },
+        running ? `checking… ${running.done} of ${running.total} done` : '');
+      const run = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-ext-audit': key, style: 'margin-inline-start:auto' }, running ? 'Auditing…' : '🔎 Audit now');
+      run.disabled = !!running;
       run.addEventListener('click', async () => {
-        run.disabled = true; status.textContent = 'starting…';
+        if (runningAudits.has(key)) return;
+        runningAudits.set(key, { done: 0, total: 0 });
+        run.disabled = true; run.textContent = 'Auditing…'; status.textContent = 'starting…';
         try {
-          const r = await runExtensionAudit(ctx.db, t.id, (done, total) => { status.textContent = `checked ${done} of ${total}…`; });
-          status.textContent = '';
-          toast(`${t.label}: audited ${r.total} link${r.total === 1 ? '' : 's'} — ${r.updated} updated${r.failedChunks ? ` (${r.failedChunks} batch${r.failedChunks === 1 ? '' : 'es'} failed: ${r.lastError})` : ''}.`);
-        } catch (e) { status.textContent = e.message || 'Audit failed.'; }
-        finally { run.disabled = false; }
+          const r = await runExtensionAudit(ctx.db, t.id, (done, total) => {
+            runningAudits.set(key, { done, total });
+            if (status.isConnected) status.textContent = `checking… ${done} of ${total} done`;
+          });
+          if (r.needsPermission) {
+            toast(`${t.label}: ${r.needsPermission} of ${r.total} links couldn’t be checked — turn on “Enable link auditing” in the extension’s toolbar popup, then run again.`, { duration: 9000 });
+          } else {
+            toast(`${t.label}: audited ${r.total} link${r.total === 1 ? '' : 's'} — ${r.updated} updated${r.failedChunks ? ` (${r.failedChunks} batch${r.failedChunks === 1 ? '' : 'es'} failed: ${r.lastError})` : ''}.`);
+          }
+        } catch (e) { toast(e.message || 'Audit failed.'); }
+        finally {
+          runningAudits.delete(key);
+          if (run.isConnected) { run.disabled = false; run.textContent = '🔎 Audit now'; }
+          if (status.isConnected) status.textContent = '';
+          refresh();                                 // final truth after the run
+        }
       });
       list.append(el('li', {}, el('strong', {}, t.label), run, status));
     }

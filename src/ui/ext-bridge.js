@@ -4,8 +4,12 @@
 // short event; a killed SW costs one retryable chunk), merging each chunk's results immediately
 // through the existing mergeAuditResults (idempotent; overrides/exemptions already enforced by
 // the worker and by listAuditUrls itself). Results are device-local by design.
-const CHUNK = 40;
-const CHUNK_TIMEOUT = 90000;
+const CHUNK = 15;                   // small chunks → real progress cadence + SW-lifetime headroom
+// Worst case for one chunk is pathological but real: 15 dead links on ONE slow host = serial
+// HEAD+GET timeouts ≈ 6 minutes. A short page-side timeout here caused a cascade in live testing:
+// the page abandoned a still-running chunk, and every later chunk instantly failed "already
+// running". Generous timeout + busy-retry below.
+const CHUNK_TIMEOUT = 420000;
 
 let extInfo = null;                 // { version, auditReady } once detected
 const subscribers = new Set();
@@ -45,19 +49,38 @@ function auditChunk(urls) {
 }
 
 // Audit one workspace (null = pathways without a workspace). onProgress(done, total).
+// PERMISSION-AWARE: without the broad fetch grant, cross-origin fetches fail INSTANTLY — merging
+// those as "Blocked" would flood the audit view with garbage in seconds (seen in live testing).
+// When the extension reports auditReady:false, failed verdicts (no real HTTP status) are NOT
+// merged; they're counted as needsPermission so the UI can say exactly what to do. Real answers
+// (e.g. same-origin/localhost, CORS-friendly hosts) still merge.
 export async function runExtensionAudit(db, workspaceId, onProgress) {
   const list = await db.listAuditUrls(workspaceId);
-  let done = 0, updated = 0, failedChunks = 0, lastError = null;
+  let done = 0, updated = 0, failedChunks = 0, lastError = null, needsPermission = 0;
   for (let i = 0; i < list.length; i += CHUNK) {
     const chunk = list.slice(i, i + CHUNK);
-    const res = await auditChunk(chunk);
+    // If the extension is still busy on a previous chunk (e.g. after a page reload mid-run),
+    // wait it out instead of hard-failing the rest of the run.
+    let res = await auditChunk(chunk);
+    for (let attempt = 0; attempt < 24 && !res.ok && /already running/i.test(res.error || ''); attempt++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      res = await auditChunk(chunk);
+    }
     if (!res.ok) { failedChunks++; lastError = res.error || 'Extension error.'; done += chunk.length; onProgress?.(done, list.length); continue; }
+    const permitted = res.auditReady !== false;
     const results = {};
-    for (const item of chunk) if (res.results[item.url_norm]) results[item.url_norm] = res.results[item.url_norm];
-    const m = await db.mergeAuditResults({ workspaceId, results, checkMethod: 'extension' });
-    updated += m.updated;
+    for (const item of chunk) {
+      const r = res.results[item.url_norm];
+      if (!r) continue;
+      if (!permitted && r.httpStatus == null) { needsPermission++; continue; }   // fetch denied, not a verdict
+      results[item.url_norm] = r;
+    }
+    if (Object.keys(results).length) {
+      const m = await db.mergeAuditResults({ workspaceId, results, checkMethod: 'extension' });
+      updated += m.updated;
+    }
     done += chunk.length;
     onProgress?.(done, list.length);
   }
-  return { total: list.length, updated, failedChunks, lastError };
+  return { total: list.length, updated, failedChunks, lastError, needsPermission };
 }

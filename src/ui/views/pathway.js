@@ -185,6 +185,7 @@ const EXPORT_FORMATS = [   // [value, label, hint, group] — grouped now that t
   ['json', 'Data file (JSON)', 'full fidelity — for importing into PathCurator', 'Data'],
   ['html', 'Web page (HTML)', 'self-contained interactive page for learners, tracks launch progress', 'Learner page'],
   ['scorm', 'SCORM package (zip)', 'tracked activity for Moodle and other LMSs — completion + gradebook', 'LMS package'],
+  ['moodle', 'Moodle starter course (.mbz)', 'one-time bootstrap: restore as a new course — single-activity, resource-style settings pre-configured', 'LMS package'],
   ['csv', 'Spreadsheet (CSV)', 'one row per link — opens in Excel/Sheets, re-importable', 'Feeds & files'],
   ['rss', 'Feed (RSS)', 'one item per link, for feed readers', 'Feeds & files'],
   ['bookmarks', 'Browser bookmarks (HTML)', 'import into any browser — a folder per step', 'Feeds & files'],
@@ -231,6 +232,10 @@ async function openExportDialog({ pathway: p, invoker, ctx }) {
       } else if (fmt === 'scorm') {
         const { buildPathwayScorm } = await import('../publish-scorm.js');
         out = await buildPathwayScorm(ctx.db, { id: p.id, attribution });
+        mime = 'application/zip';
+      } else if (fmt === 'moodle') {
+        const { buildPathwayMoodleCourse } = await import('../publish-moodle.js');
+        out = await buildPathwayMoodleCourse(ctx.db, { id: p.id, attribution });
         mime = 'application/zip';
       } else if (fmt === 'csv') {
         const { buildPathwayCsv } = await import('../publish-feeds.js');

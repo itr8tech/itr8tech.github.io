@@ -70,5 +70,6 @@ export async function buildPathwayScorm(db, { id, attribution = false }) {
       { name: 'index.html', data: page.content },
     ]),
     filename: `${page.meta.slug}--scorm--${today()}.zip`,
+    meta: page.meta,                              // for wrappers (the Moodle starter course)
   };
 }

@@ -141,11 +141,28 @@ If your organisation runs a learning platform (Moodle, Totara, and most others),
 pathway as a **tracked activity**: the LMS records each learner's progress, shows completion,
 and puts a score in the gradebook — the percentage of required links they've launched.
 
-### Add it to Moodle
+### Fastest: restore the starter course
+
+Choose **Moodle starter course (.mbz)** in the export dialog and you skip all setup:
+
+1. In Moodle: *Site administration → Courses → Restore* (or **Restore** inside a course category).
+2. Upload the .mbz file and restore it **as a new course**.
+
+You get a complete course that opens straight into the pathway — single-activity format,
+pre-configured the resource-friendly way: no "Enter" screen, no attempt counters, grade hidden
+from learners, and progress that resumes across visits for as long as the pathway takes.
+Rename the course, enrol your learners, done.
+
+### Adding to an existing course instead
 
 1. Open the pathway, press **⬇ Export…**, choose **SCORM package (zip)**.
 2. In your Moodle course, turn editing on and add a **SCORM package** activity.
 3. Upload the zip file. That's it — no plugin to install, no server to run.
+
+By default Moodle presents SCORM rather quiz-like. For the resource feel, set: *Skip content
+structure page* → Always · *Display attempt status* → No · *Attempts allowed* → Unlimited ·
+*Force new attempt* → No — and hide the activity's grade item if you don't want it in the
+gradebook. (The starter course above ships with exactly these.)
 
 Learners see the same interactive page as the web export — steps, search, progress bar — inside
 the course. Their progress is saved **by the LMS**, per learner, and survives log-outs and new
@@ -316,6 +333,9 @@ offline. Use for sharing with the people who'll take the pathway.
 - **SCORM package (zip)** — the same learner page, wrapped for an LMS (Moodle & friends): the
 LMS tracks per-learner completion and grades. Replacing the package in an activity is an
 *update* — progress and grades survive.
+- **Moodle starter course (.mbz)** — a complete Moodle course with the SCORM activity already
+inside and configured resource-style (no "Enter" page, no attempt counters, grade hidden).
+One-time bootstrap: restore it as a new course, then keep it fresh by replacing the package.
 - **Spreadsheet (CSV)** — one row per link. Opens in Excel or Google Sheets. Re-importable.
 - **Feed (RSS)** — one item per link, for feed readers and other tools.
 - **Browser bookmarks (HTML)** — importable by any browser; each step becomes a folder.

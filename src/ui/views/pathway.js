@@ -181,12 +181,13 @@ export default async function mount(container, params, ctx) {
 // name) is OFF by default, remembered as a setting, and applies to the publishing formats (web
 // page / CSV / RSS); the JSON data file always carries full data by design. Richer attribution
 // (bio, author link, several fields) is a recorded TODO for later.
-const EXPORT_FORMATS = [
-  ['json', 'Data file (JSON)', 'full fidelity — for importing into PathCurator'],
-  ['html', 'Web page (HTML)', 'self-contained interactive page for learners, tracks launch progress'],
-  ['csv', 'Spreadsheet (CSV)', 'one row per link — opens in Excel/Sheets, re-importable'],
-  ['rss', 'Feed (RSS)', 'one item per link, for feed readers'],
-  ['bookmarks', 'Browser bookmarks (HTML)', 'import into any browser — a folder per step'],
+const EXPORT_FORMATS = [   // [value, label, hint, group] — grouped now that there are six
+  ['json', 'Data file (JSON)', 'full fidelity — for importing into PathCurator', 'Data'],
+  ['html', 'Web page (HTML)', 'self-contained interactive page for learners, tracks launch progress', 'Learner page'],
+  ['scorm', 'SCORM package (zip)', 'tracked activity for Moodle and other LMSs — completion + gradebook', 'LMS package'],
+  ['csv', 'Spreadsheet (CSV)', 'one row per link — opens in Excel/Sheets, re-importable', 'Feeds & files'],
+  ['rss', 'Feed (RSS)', 'one item per link, for feed readers', 'Feeds & files'],
+  ['bookmarks', 'Browser bookmarks (HTML)', 'import into any browser — a folder per step', 'Feeds & files'],
 ];
 async function openExportDialog({ pathway: p, invoker, ctx }) {
   const { el } = await import('../dom.js');
@@ -195,15 +196,19 @@ async function openExportDialog({ pathway: p, invoker, ctx }) {
   const cb = el('input', { type: 'checkbox', name: 'attribution', checked: saved });
   const err = el('p', { class: 'field-error', role: 'alert' });
   const submit = el('button', { type: 'submit', class: 'btn btn--primary' }, 'Export');
-  const radios = EXPORT_FORMATS.map(([value, label, hint], i) => {
+  let lastGroup = null;
+  const radios = EXPORT_FORMATS.flatMap(([value, label, hint, group], i) => {
     const r = el('input', { type: 'radio', name: 'fmt', value, checked: i === 0 });
-    return el('label', { class: 'export-fmt' }, r, el('span', {}, el('strong', {}, label), ' — ', el('span', { class: 'muted' }, hint)));
+    const item = el('label', { class: 'export-fmt' }, r, el('span', {}, el('strong', {}, label), ' — ', el('span', { class: 'muted' }, hint)));
+    const head = group !== lastGroup ? [el('p', { class: 'export-group', 'aria-hidden': 'true' }, group)] : [];
+    lastGroup = group;
+    return [...head, item];
   });
   const form = el('form', { novalidate: true, 'aria-labelledby': 'exp-h' },
     el('h2', { id: 'exp-h', 'data-view-heading': true, tabindex: -1 }, `Export — ${p.name}`),
     el('fieldset', { class: 'export-fmts' }, el('legend', {}, 'Format'), ...radios),
     el('label', { class: 'field-label', style: 'display:flex;gap:.5rem;align-items:center;font-weight:400' }, cb,
-      ' Include author attribution (web page, CSV and RSS)'),
+      ' Include author attribution (web page, SCORM, CSV and RSS)'),
     err,
     el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Cancel'), submit));
   form.querySelector('.form-actions .btn').addEventListener('click', () => dlg.close('cancel'));
@@ -223,6 +228,10 @@ async function openExportDialog({ pathway: p, invoker, ctx }) {
         const { buildPathwayHtml } = await import('../publish-html.js');
         out = await buildPathwayHtml(ctx.db, { id: p.id, attribution });
         mime = 'text/html;charset=utf-8';
+      } else if (fmt === 'scorm') {
+        const { buildPathwayScorm } = await import('../publish-scorm.js');
+        out = await buildPathwayScorm(ctx.db, { id: p.id, attribution });
+        mime = 'application/zip';
       } else if (fmt === 'csv') {
         const { buildPathwayCsv } = await import('../publish-feeds.js');
         out = await buildPathwayCsv(ctx.db, { id: p.id, attribution });

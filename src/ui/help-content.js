@@ -132,6 +132,43 @@ Prefer not to include your name? The export dialog has an attribution checkbox �
 `,
   },
   {
+    id: 'lms',
+    title: 'Put a pathway in your LMS',
+    blurb: 'A tracked activity in Moodle & friends — no plugins, no servers.',
+    related: ['share', 'r-exports'],
+    body: `
+If your organisation runs a learning platform (Moodle, Totara, and most others), you can add a
+pathway as a **tracked activity**: the LMS records each learner's progress, shows completion,
+and puts a score in the gradebook — the percentage of required links they've launched.
+
+### Add it to Moodle
+
+1. Open the pathway, press **⬇ Export…**, choose **SCORM package (zip)**.
+2. In your Moodle course, turn editing on and add a **SCORM package** activity.
+3. Upload the zip file. That's it — no plugin to install, no server to run.
+
+Learners see the same interactive page as the web export — steps, search, progress bar — inside
+the course. Their progress is saved **by the LMS**, per learner, and survives log-outs and new
+computers. (The page's own save/restore buttons disappear here, because the LMS has taken over
+that job.)
+
+### When you fix or improve the pathway
+
+Export a fresh SCORM package and use the activity's settings to **replace the package file** —
+don't create a new activity. PathCurator builds every package of the same pathway with the same
+internal identity, so the LMS treats the replacement as an update: grades, attempts, and each
+learner's progress carry over. Progress is tied to the links themselves, so learners only
+"lose" credit for links you deleted.
+
+### Good to know
+
+- The score is a progress measure (0–100% of required links), not a test result.
+- A pathway with no required links marks itself complete on first open — attendance, honestly.
+- The **Web page (HTML)** export remains the right choice outside an LMS — same page, no
+tracking infrastructure needed.
+`,
+  },
+  {
     id: 'files',
     title: 'Back up, send, and receive files',
     blurb: 'Your safety net, and collaboration without any accounts.',
@@ -276,6 +313,9 @@ From a pathway's **⬇ Export…** dialog:
 that round-trips *everything*. Use for backups and for sending to other curators.
 - **Web page (HTML)** — the learner-facing page with progress tracking. Self-contained, works
 offline. Use for sharing with the people who'll take the pathway.
+- **SCORM package (zip)** — the same learner page, wrapped for an LMS (Moodle & friends): the
+LMS tracks per-learner completion and grades. Replacing the package in an activity is an
+*update* — progress and grades survive.
 - **Spreadsheet (CSV)** — one row per link. Opens in Excel or Google Sheets. Re-importable.
 - **Feed (RSS)** — one item per link, for feed readers and other tools.
 - **Browser bookmarks (HTML)** — importable by any browser; each step becomes a folder.
@@ -283,8 +323,8 @@ offline. Use for sharing with the people who'll take the pathway.
 From the Dashboard: **⬇** on a workspace exports all its pathways in one data file;
 **⬇ Back up everything** exports all workspaces, plus your audit settings.
 
-The attribution checkbox (your name in the published output) applies to the web page, CSV, and
-RSS. It is **off** unless you switch it on, and your choice is remembered.
+The attribution checkbox (your name in the published output) applies to the web page, SCORM,
+CSV, and RSS. It is **off** unless you switch it on, and your choice is remembered.
 `,
   },
   {

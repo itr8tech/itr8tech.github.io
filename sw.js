@@ -7,13 +7,13 @@
 // PRECACHE is enumerated EXPLICITLY: routes and dialogs are dynamically imported, so a glob would miss
 // them and offline navigation to an unvisited route would 404. Keep this list in sync with the modules
 // (the p4-pwa offline test navigates a route to catch drift).
-const CACHE = 'pathcurator-v3';   // bump on precache/strategy changes → activate() purges the old one
+const CACHE = 'pathcurator-v4';   // bump on precache/strategy changes → activate() purges the old one
 const PRECACHE = [
   '/', '/index.html', '/manifest.webmanifest', '/src/ui/app.css',
   // ui modules
   '/src/ui/a11y.js', '/src/ui/attachments.js', '/src/ui/connect.js', '/src/ui/dom.js', '/src/ui/editors.js',
   '/src/ui/main.js', '/src/ui/markdown.js', '/src/ui/reorder.js', '/src/ui/router.js', '/src/ui/shell.js',
-  '/src/ui/sync-indicator.js', '/src/ui/theme.js', '/src/ui/theme-guard.js', '/src/ui/inbox-badge.js', '/src/ui/inbox-triage.js', '/src/ui/pathway-diff.js', '/src/ui/import-dialog.js', '/src/ui/download.js', '/src/ui/publish-html.js', '/src/ui/publish-feeds.js', '/src/ui/toast.js', '/src/ui/md-editor.js', '/src/ui/ext-bridge.js',
+  '/src/ui/sync-indicator.js', '/src/ui/theme.js', '/src/ui/theme-guard.js', '/src/ui/inbox-badge.js', '/src/ui/inbox-triage.js', '/src/ui/pathway-diff.js', '/src/ui/import-dialog.js', '/src/ui/download.js', '/src/ui/publish-html.js', '/src/ui/publish-feeds.js', '/src/ui/toast.js', '/src/ui/md-editor.js', '/src/ui/ext-bridge.js', '/src/ui/zip.js', '/src/ui/publish-scorm.js',
   // route/dialog modules (dynamically imported → precache explicitly)
   '/src/ui/views/dashboard.js', '/src/ui/views/merge.js', '/src/ui/views/notfound.js',
   '/src/ui/views/pathway.js', '/src/ui/views/sync.js', '/src/ui/views/inbox.js', '/src/ui/views/audit.js', '/src/ui/views/help.js', '/src/ui/help-content.js',

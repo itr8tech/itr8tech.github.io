@@ -212,46 +212,48 @@ export default async function mount(container, params, ctx) {
     return sec;
   }
 
+  // BUILD-THEN-SWAP with a sequence guard: this view refreshes from several triggers (mount,
+  // db change events, the extension announcing itself) and the body awaits between DOM writes —
+  // two interleaved refreshes were double-appending sections. Build everything off-DOM first;
+  // only the newest refresh gets to swap it in.
+  let renderSeq = 0;
   async function refresh() {
+    const seq = ++renderSeq;
     const flagged = await ctx.db.listFlaggedBookmarks();
     const primary = ctx.isPrimary();
-    // Section headers stick just below the (sticky) app header — measure it rather than guess.
-    root.style.setProperty('--sticky-top', `${document.querySelector('.app-header')?.offsetHeight || 56}px`);
-    clear(root);
-    root.append(el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Link audit'));
-    root.append(el('p', { class: 'muted audit-intro' }, 'Flagged links across all workspaces. “Good” trusts a false positive for ~90 days then lets the auditor re-check it; “Pin good” trusts it forever; “Broken” flags a known-dead link; “Auto” hands it back to the auditor now. Overrides are committed to the repo (audit/overrides.json) with your next commit, so they apply on every device and the audit workflow skips those links.'));
+    const kids = [
+      el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Link audit'),
+      el('p', { class: 'muted audit-intro' }, 'Flagged links across all workspaces. “Good” trusts a false positive for ~90 days then lets the auditor re-check it; “Pin good” trusts it forever; “Broken” flags a known-dead link; “Auto” hands it back to the auditor now. Overrides are committed to the repo (audit/overrides.json) with your next commit, so they apply on every device and the audit workflow skips those links.'),
+    ];
 
     if (!flagged.length) {
-      root.append(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
-      if (primary) {
-        const ext = await renderExtensionSection();
-        if (ext) root.append(ext);
-        const wf = await renderWorkflowSection();
-        if (wf) root.append(wf);
-        root.append(await renderExemptSection());
+      kids.push(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
+    } else {
+      const expand = el('button', { type: 'button', class: 'btn btn--sm' }, 'Expand all');
+      const collapse = el('button', { type: 'button', class: 'btn btn--sm' }, 'Collapse all');
+      expand.addEventListener('click', () => setAll(true));
+      collapse.addEventListener('click', () => setAll(false));
+      kids.push(el('div', { class: 'audit-controls' }, expand, collapse));
+      const byCat = {};
+      for (const b of flagged) (byCat[category(b)] ||= []).push(b);
+      for (const [key, label] of SECTIONS) {
+        const items = byCat[key];
+        if (items?.length) kids.push(section(key, label, items, primary));
       }
-      return;
-    }
-    const expand = el('button', { type: 'button', class: 'btn btn--sm' }, 'Expand all');
-    const collapse = el('button', { type: 'button', class: 'btn btn--sm' }, 'Collapse all');
-    expand.addEventListener('click', () => setAll(true));
-    collapse.addEventListener('click', () => setAll(false));
-    root.append(el('div', { class: 'audit-controls' }, expand, collapse));
-
-    const byCat = {};
-    for (const b of flagged) (byCat[category(b)] ||= []).push(b);
-    for (const [key, label] of SECTIONS) {
-      const items = byCat[key];
-      if (!items?.length) continue;
-      root.append(section(key, label, items, primary));
     }
     if (primary) {
       const ext = await renderExtensionSection();
-      if (ext) root.append(ext);
+      if (ext) kids.push(ext);
       const wf = await renderWorkflowSection();
-      if (wf) root.append(wf);
-      root.append(await renderExemptSection());
+      if (wf) kids.push(wf);
+      kids.push(await renderExemptSection());
     }
+
+    if (seq !== renderSeq) return;                 // superseded by a newer refresh — discard
+    // Section headers stick just below the (sticky) app header — measure it rather than guess.
+    root.style.setProperty('--sticky-top', `${document.querySelector('.app-header')?.offsetHeight || 56}px`);
+    clear(root);
+    root.append(...kids);
   }
 
   await refresh();

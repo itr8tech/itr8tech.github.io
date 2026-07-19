@@ -196,6 +196,18 @@
   .tt-wrap--end .tt{ left:auto; right:0; }   /* right-edge toolbars: keep the tip on-screen */
   .theme-toggle__icon{ font-size:1.05rem; line-height:1; }
   @media (prefers-reduced-motion:reduce){ .tt{ transition:none; } }
+  /* P8: browser-extension live-check card (top of #/audit) */
+  .ext-audit{ margin:var(--space-4) 0 var(--space-5); padding:var(--space-4);
+    border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border)); border-radius:var(--radius-lg);
+    background:color-mix(in srgb,var(--accent) 5%,var(--surface)); }
+  .ext-audit > h2{ font-size:1.1rem; margin:0 0 var(--space-1); }
+  .ext-audit__row{ display:grid; gap:var(--space-2); padding:var(--space-3) 0 var(--space-2); border-top:1px solid var(--border); margin-top:var(--space-3); }
+  .ext-audit__head{ display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); flex-wrap:wrap; }
+  .ext-audit__bar{ height:9px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-pill); overflow:hidden; }
+  .ext-audit__fill{ height:100%; width:0; background:var(--accent); transition:width .35s var(--ease); }
+  .ext-audit__status{ font-size:.875rem; }
+  .ext-audit__summary{ margin:0; font-size:.95rem; }
+
   /* in-app help (#/help) */
   .help-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(15rem,1fr)); gap:var(--space-3); margin:var(--space-3) 0 var(--space-5); }
   .help-card{ display:grid; gap:var(--space-1); text-decoration:none; color:var(--text); padding:var(--space-4); position:relative; }

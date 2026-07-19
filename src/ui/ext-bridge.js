@@ -57,6 +57,16 @@ function auditChunk(urls) {
 export async function runExtensionAudit(db, workspaceId, onProgress) {
   const list = await db.listAuditUrls(workspaceId);
   let done = 0, updated = 0, failedChunks = 0, lastError = null, needsPermission = 0;
+  // Human-facing outcome tally (per URL, not per bookmark row — "updated" counts rows and reads
+  // as nonsense when one URL lives in several bookmarks).
+  const summary = { ok: 0, broken: 0, redirected: 0, auth: 0, unreachable: 0 };
+  const tally = (r) => {
+    if (r.httpStatus == null) summary.unreachable++;
+    else if (r.requiresAuth) summary.auth++;
+    else if (r.available === 0) summary.broken++;
+    else if (r.redirectUrl) summary.redirected++;
+    else summary.ok++;
+  };
   for (let i = 0; i < list.length; i += CHUNK) {
     const chunk = list.slice(i, i + CHUNK);
     // If the extension is still busy on a previous chunk (e.g. after a page reload mid-run),
@@ -74,6 +84,7 @@ export async function runExtensionAudit(db, workspaceId, onProgress) {
       if (!r) continue;
       if (!permitted && r.httpStatus == null) { needsPermission++; continue; }   // fetch denied, not a verdict
       results[item.url_norm] = r;
+      tally(r);
     }
     if (Object.keys(results).length) {
       const m = await db.mergeAuditResults({ workspaceId, results, checkMethod: 'extension' });
@@ -82,5 +93,5 @@ export async function runExtensionAudit(db, workspaceId, onProgress) {
     done += chunk.length;
     onProgress?.(done, list.length);
   }
-  return { total: list.length, updated, failedChunks, lastError, needsPermission };
+  return { total: list.length, updated, failedChunks, lastError, needsPermission, summary };
 }

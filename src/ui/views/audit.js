@@ -47,6 +47,22 @@ function overrideNote(b) {
 // mid-run. State living here survives re-renders (and remounts), so the section always shows the
 // truth: running → progress text + disabled button.
 const runningAudits = new Map();   // key (wsId | 'local') → { done, total }
+const lastAuditRuns = new Map();   // key → { at, total, summary, needsPermission, failedChunks, lastError }
+
+// The human conclusion of a run — issues first, and an explicit all-clear when there are none.
+function runSummaryText(r) {
+  if (r.needsPermission) return `${r.needsPermission} of ${r.total} links couldn’t be checked — turn on “Enable link auditing” in the extension’s toolbar popup, then run again.`;
+  const s = r.summary || {};
+  const parts = [];
+  if (s.broken) parts.push(`${s.broken} broken`);
+  if (s.unreachable) parts.push(`${s.unreachable} unreachable`);
+  if (s.redirected) parts.push(`${s.redirected} redirected`);
+  if (s.auth) parts.push(`${s.auth} behind a login`);
+  const tail = r.failedChunks ? ` (${r.failedChunks} batch${r.failedChunks === 1 ? '' : 'es'} failed: ${r.lastError})` : '';
+  return parts.length
+    ? `${r.total} checked — ${parts.join(', ')} · ${s.ok} OK. Details in the sections below.${tail}`
+    : `All ${r.total} links look good ✓${tail}`;
+}
 
 // Instant, focus-friendly tooltips (title= takes ~1s to appear and never shows on focus).
 const ACTIONS = [
@@ -158,10 +174,10 @@ export default async function mount(container, params, ctx) {
     return sec;
   }
 
-  // P8: live audit via the browser extension — shown only when the bridge announces itself.
-  // ALL workspaces (connected or not — repo-less curators are the audience) + a bucket for
-  // workspace-less pathways. Results are device-local (the committed results.json stays
-  // Action-owned).
+  // P8: live audit via the browser extension — a PROMINENT card at the top of the view (progress
+  // bar + persistent per-workspace conclusions). ALL workspaces (connected or not — repo-less
+  // curators are the audience) + a bucket for workspace-less pathways. Results are device-local
+  // (the committed results.json stays Action-owned).
   async function renderExtensionSection() {
     if (!extensionInfo()) return null;
     const workspaces = await ctx.db.getWorkspaces();
@@ -169,42 +185,50 @@ export default async function mount(container, params, ctx) {
     const localCount = (await ctx.db.listAuditUrls(null)).length;
     if (localCount) targets.push({ id: null, label: 'Local pathways (no workspace)' });
     if (!targets.length) return null;
-    const sec = el('section', { class: 'exempt-section', 'aria-labelledby': 'extaudit-h' });
+    const sec = el('section', { class: 'ext-audit', 'aria-labelledby': 'extaudit-h' });
     sec.append(el('h2', { id: 'extaudit-h' }, 'Browser-extension audit'),
-      el('p', { class: 'muted' }, 'Checks every link from THIS browser — including intranet links CI can’t reach. Results apply on this device only (the committed results file stays with the workflow). Exempted and pinned/verified links are skipped.'));
-    const list = el('ul', { class: 'exempt-list', role: 'list' });
+      el('p', { class: 'muted' }, 'Checks every link from this browser — including intranet links CI can’t reach. Results apply on this device; exempted and pinned links are skipped.'));
     for (const t of targets) {
       const key = t.id ?? 'local';
       const running = runningAudits.get(key);
-      const status = el('span', { class: 'muted', role: 'status' },
-        running ? `checking… ${running.done} of ${running.total} done` : '');
-      const run = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-ext-audit': key, style: 'margin-inline-start:auto' }, running ? 'Auditing…' : '🔎 Audit now');
+      const last = lastAuditRuns.get(key);
+      const fill = el('div', { class: 'ext-audit__fill' });
+      const bar = el('div', { class: 'ext-audit__bar', role: 'progressbar', 'aria-label': `Audit progress for ${t.label}`, 'aria-valuemin': '0', 'aria-valuemax': '100' }, fill);
+      const status = el('span', { class: 'muted ext-audit__status', role: 'status' });
+      const setProgress = (done, total) => {
+        bar.hidden = false;
+        const pct = total ? Math.round((done / total) * 100) : 0;
+        fill.style.width = `${pct}%`;
+        bar.setAttribute('aria-valuenow', String(pct));
+        status.textContent = `checking ${done} of ${total}…`;
+      };
+      if (running) setProgress(running.done, running.total); else bar.hidden = true;
+      const summaryLine = el('p', { class: 'ext-audit__summary' },
+        running ? '' : last ? runSummaryText(last) : el('span', { class: 'muted' }, 'Not checked yet in this session.'));
+      const run = el('button', { type: 'button', class: 'btn', 'data-requires-primary': true, 'data-ext-audit': key }, running ? 'Auditing…' : '🔎 Audit now');
       run.disabled = !!running;
       run.addEventListener('click', async () => {
         if (runningAudits.has(key)) return;
         runningAudits.set(key, { done: 0, total: 0 });
-        run.disabled = true; run.textContent = 'Auditing…'; status.textContent = 'starting…';
+        run.disabled = true; run.textContent = 'Auditing…';
+        setProgress(0, 0); status.textContent = 'starting…'; summaryLine.textContent = '';
         try {
           const r = await runExtensionAudit(ctx.db, t.id, (done, total) => {
             runningAudits.set(key, { done, total });
-            if (status.isConnected) status.textContent = `checking… ${done} of ${total} done`;
+            if (bar.isConnected) setProgress(done, total);
           });
-          if (r.needsPermission) {
-            toast(`${t.label}: ${r.needsPermission} of ${r.total} links couldn’t be checked — turn on “Enable link auditing” in the extension’s toolbar popup, then run again.`, { duration: 9000 });
-          } else {
-            toast(`${t.label}: audited ${r.total} link${r.total === 1 ? '' : 's'} — ${r.updated} updated${r.failedChunks ? ` (${r.failedChunks} batch${r.failedChunks === 1 ? '' : 'es'} failed: ${r.lastError})` : ''}.`);
-          }
+          lastAuditRuns.set(key, { at: Date.now(), ...r });
+          toast(`${t.label}: ${runSummaryText(r)}`, { duration: r.needsPermission ? 9000 : 6000 });
         } catch (e) { toast(e.message || 'Audit failed.'); }
         finally {
           runningAudits.delete(key);
-          if (run.isConnected) { run.disabled = false; run.textContent = '🔎 Audit now'; }
-          if (status.isConnected) status.textContent = '';
-          refresh();                                 // final truth after the run
+          refresh();                                 // re-render lands the persistent conclusion
         }
       });
-      list.append(el('li', {}, el('strong', {}, t.label), run, status));
+      sec.append(el('div', { class: 'ext-audit__row' },
+        el('div', { class: 'ext-audit__head' }, el('strong', {}, t.label), run),
+        bar, status, summaryLine));
     }
-    sec.append(list);
     return sec;
   }
 
@@ -248,6 +272,11 @@ export default async function mount(container, params, ctx) {
       el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Link audit'),
       el('p', { class: 'muted audit-intro' }, 'Flagged links across all workspaces. “Good” trusts a false positive for ~90 days then lets the auditor re-check it; “Pin good” trusts it forever; “Broken” flags a known-dead link; “Auto” hands it back to the auditor now. Overrides are committed to the repo (audit/overrides.json) with your next commit, so they apply on every device and the audit workflow skips those links.'),
     ];
+    // The live-check card sits at the TOP — it's the action, not an appendix.
+    if (primary) {
+      const ext = await renderExtensionSection();
+      if (ext) kids.push(ext);
+    }
 
     if (!flagged.length) {
       kids.push(el('p', { class: 'muted' }, 'No flagged links. Run the audit workflow (or pull) to populate statuses, then any problems show up here.'));
@@ -265,8 +294,6 @@ export default async function mount(container, params, ctx) {
       }
     }
     if (primary) {
-      const ext = await renderExtensionSection();
-      if (ext) kids.push(ext);
       const wf = await renderWorkflowSection();
       if (wf) kids.push(wf);
       kids.push(await renderExemptSection());

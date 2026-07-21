@@ -69,7 +69,8 @@ export default async function mount(container, params, ctx) {
       // not connected → a single positive "Connect to GitHub…" button, no warning chips.
       const wsHeader = el('header', {}, el('h2', { id: `ws-${ws.id}` }, `${ws.org_label} `,
         el('span', { class: 'muted' }, `(${ws.pathway_count})`)),
-        connected ? el('span', { class: 'ws-conn is-connected' }, `${ws.owner}/${ws.repo}`) : '');
+        connected ? el('a', { class: 'ws-conn is-connected', href: `https://github.com/${ws.owner}/${ws.repo}`,
+          target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${ws.owner}/${ws.repo} on GitHub` }, `${ws.owner}/${ws.repo} ↗`) : '');
       // Icon toolbar with instant tooltips (same .tt pattern as #/audit; 'end'-aligned so the
       // tips stay on-screen at the right edge).
       if (primary) wsHeader.append(el('span', { class: 'row', style: 'margin-left:auto' },

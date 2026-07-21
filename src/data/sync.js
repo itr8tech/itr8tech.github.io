@@ -190,9 +190,9 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     }
 
     const treeSha = await client.createTree({ baseTreeSha: baseCommit?.treeSha, entries });
+    const commitMessage = message || (contentChanged ? defaultMessage(ser) : 'Update audit settings');
     const commitSha = await client.createCommit({
-      message: message || (contentChanged ? defaultMessage(ser) : 'Update audit settings'),
-      treeSha, parents: ref ? [ref.sha] : [] });
+      message: commitMessage, treeSha, parents: ref ? [ref.sha] : [] });
 
     // GUARD 2 — force:false so a race between preflight and here is rejected (422 → ConflictError).
     try {
@@ -217,7 +217,30 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     if (exChanged) await db.setSetting(EX_KEY(wsId), JSON.stringify({ sha: exBlobSha, exempt: exSer.exempt }));
     clearConflict(wsId);
     await refreshOne(wsId);
+    await recordSyncAction(wsId, { type: 'commit', message: commitMessage, changed: ser.changedCount, deleted: ser.deletedCount, sha: commitSha });
     return { ok: true, committed: true, commitSha, changed: ser.changedCount, deleted: ser.deletedCount };
+  }
+
+  // #/sync: remember the last commit/pull performed FROM THIS BROWSER, at action time — showing
+  // "when did I last sync" must not need a network round-trip. Cosmetic; failures never surface.
+  async function recordSyncAction(wsId, info) {
+    try { await db.setSetting(`sync_last_action:${wsId}`, JSON.stringify({ at: now(), ...info })); } catch { /* cosmetic */ }
+  }
+
+  // #/sync: what the repository's HEAD looks like right now (message/author/date), plus whether
+  // this device has already pulled it. Read-only, best-effort — the overview fills it in async.
+  async function remoteHead(wsId) {
+    const ws = await db.getWorkspace(wsId);
+    if (!ws?.owner || !ws.repo) return null;
+    const token = await db.getWorkspacePat(wsId);
+    if (!token) return null;
+    const client = makeClient(ws, token);
+    const ref = await client.getRef();
+    if (!ref) return null;
+    const meta = await client.getCommitMeta(ref.sha);
+    const state = await db.getSyncState(wsId);
+    return { ...meta, pulled: state?.lastCommitSha === ref.sha,
+      url: `https://github.com/${ws.owner}/${ws.repo}/commit/${ref.sha}` };
   }
 
   // Initialize = the first commit of a (usually empty) repo. commit() already handles ref==null.
@@ -304,6 +327,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     if (!ref) return { ok: true, upToDate: true, empty: true };
     const state = await db.getSyncState(wsId);
     if (state?.lastCommitSha === ref.sha) {
+      await recordSyncAction(wsId, { type: 'pull', upToDate: true });
       // Remote hasn't moved — but if this workspace is still EMPTY, check for an unmigrated legacy
       // file anyway. (The stub-manifest state — an empty v2 layout committed next to
       // curator-pathways.json — would otherwise sit "in sync" forever with no import offer.)
@@ -690,7 +714,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     init: () => refreshAll(),
     refreshOne, refreshAll,
     handleChange: (evt) => { if (!evt || evt.entity === '*' || ['pathways', 'steps', 'bookmarks', 'workspaces', 'sync'].includes(evt.entity)) refreshAll(); },
-    commit, initialize, pull, resolvePull, importLegacy, installAuditTooling, auditToolingStatus,
+    commit, initialize, pull, resolvePull, importLegacy, installAuditTooling, auditToolingStatus, remoteHead,
     fetchCommittedPathways, discardLocalChanges,
     getPendingPull: (wsId) => pendingPull.get(wsId) || null,
     getAutoCommit, setAutoCommit, startTimers, stopTimers,

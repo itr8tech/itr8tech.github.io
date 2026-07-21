@@ -78,6 +78,9 @@ export function createGitHubClient({
     },
     getCommit: (sha) => api('GET', `/git/commits/${sha}`)
       .then((c) => ({ sha: c.sha, treeSha: c.tree.sha, parents: (c.parents || []).map((p) => p.sha) })),
+    // Human-facing commit facts for the #/sync overview (message/author/date, not tree plumbing).
+    getCommitMeta: (sha) => api('GET', `/git/commits/${sha}`)
+      .then((c) => ({ sha: c.sha, message: c.message || '', author: c.author?.name || null, date: c.author?.date || null })),
     getTree: (sha) => api('GET', `/git/trees/${sha}?recursive=1`)
       .then((t) => ({ truncated: !!t.truncated, tree: t.tree })),
     getBlobBytes: (sha) => api('GET', `/git/blobs/${sha}`).then((b) => b64ToBytes(b.content)),

@@ -540,7 +540,27 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
         }
       } catch { current = null; }                          // comparison failed → unknown, not "drifted"
     }
-    return { ok: true, workflow, scripts, hasResults: results.exists, current };
+    // Pertinent last-run facts for the UI, read from the committed results.json itself (best-
+    // effort — a malformed file degrades to the bare "active" status, never an error): when the
+    // scan ran, how many links, the issue tally, and whether THIS device has merged that sha yet.
+    let lastRun = null;
+    if (results.exists) {
+      try {
+        const rf = await client.getBlobJson(results.sha);
+        const tally = { total: 0, broken: 0, auth: 0, redirected: 0, unreachable: 0 };
+        for (const r of Object.values(rf?.results || {})) {
+          tally.total++;
+          if (r.requiresAuth) tally.auth++;
+          else if (r.httpStatus == null) tally.unreachable++;
+          else if (r.available === 0) tally.broken++;
+          else if (r.redirectUrl) tally.redirected++;
+        }
+        let mergedSha = null;
+        try { mergedSha = JSON.parse((await db.getSetting(`audit_state:${wsId}`)) || '{}').resultsSha ?? null; } catch { /* first run */ }
+        lastRun = { generatedAt: rf?.generatedAt ?? null, ...tally, merged: mergedSha === results.sha };
+      } catch { /* status stays useful without it */ }
+    }
+    return { ok: true, workflow, scripts, hasResults: results.exists, current, lastRun };
   }
 
   // P6: import the legacy curator-pathways.json into this (connected, otherwise-empty) workspace.

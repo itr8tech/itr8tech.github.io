@@ -166,6 +166,9 @@
   .exempt-section{ margin-top:var(--space-6); border-top:1px solid var(--border); padding-top:var(--space-4); }
   .exempt-list{ list-style:none; margin:var(--space-2) 0; padding:0; display:grid; gap:var(--space-2); }
   .exempt-list > li{ display:flex; align-items:center; gap:var(--space-2); }
+  .exempt-list > li.wf-item{ display:grid; gap:var(--space-1); align-items:start; }
+  .wf-item__head{ display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; }
+  .wf-runline{ margin:0; font-size:.875rem; }
   .exempt-add{ display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; }
   .card-broken{ color:var(--danger,#c0392b); font-weight:600; }
   /* review / discard uncommitted changes */

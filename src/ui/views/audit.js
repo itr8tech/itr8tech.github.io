@@ -132,9 +132,23 @@ export default async function mount(container, params, ctx) {
   // installed → installed-waiting-on-first-run → active (results committed).
   const statusText = (s) => !s.workflow && !s.scripts ? 'not installed'
     : s.workflow && s.current === false ? (s.hasResults ? 'active — update available' : 'installed — update available')
-    : s.workflow && s.hasResults ? 'active — audit results committed ✓'
+    : s.workflow && s.hasResults ? 'active ✓ — checks all links weekly (Mondays 06:17 UTC)'
     : s.workflow ? 'installed — waiting for the first audit run'
     : 'scripts only — workflow file missing (the token needs the “Workflows” permission)';
+  // The last committed scan, summarized like the extension card: when, how many, what was found,
+  // and whether this device has merged those results yet.
+  function wfRunText(lr) {
+    if (!lr) return null;
+    const parts = [];
+    if (lr.broken) parts.push(`${lr.broken} broken`);
+    if (lr.unreachable) parts.push(`${lr.unreachable} unreachable`);
+    if (lr.redirected) parts.push(`${lr.redirected} redirected`);
+    if (lr.auth) parts.push(`${lr.auth} behind a login`);
+    const when = lr.generatedAt ? `Last scan ${relTime(lr.generatedAt)}` : 'Last scan';
+    const found = lr.total === 0 ? 'no links audited yet'
+      : `${lr.total} links checked — ${parts.length ? parts.join(', ') : 'no issues found ✓'}`;
+    return `${when} · ${found} · ${lr.merged ? 'merged into the app ✓' : 'new results arrive on your next pull'}`;
+  }
   // The button earns its place only when there is something to do: not installed, scripts-only,
   // or the committed copies drifted behind the app's ("Update"). Fully installed + current → no button.
   const needsButton = (s) => !s.workflow || !s.scripts || s.current === false;
@@ -147,12 +161,16 @@ export default async function mount(container, params, ctx) {
     const list = el('ul', { class: 'exempt-list', role: 'list' });
     for (const w of workspaces) {
       const status = el('span', { class: 'muted', role: 'status' }, 'checking…');
+      const runline = el('p', { class: 'muted wf-runline', hidden: true });
       const install = el('button', { type: 'button', class: 'btn btn--sm', 'data-requires-primary': true, 'data-audit-install': w.id, style: 'margin-inline-start:auto', hidden: true }, 'Install / update');
       const probe = () => ctx.sync.auditToolingStatus(w.id)
         .then((s) => {
           status.textContent = statusText(s);
           install.hidden = !needsButton(s);
           install.textContent = s.current === false ? 'Update' : 'Install / update';
+          const t = wfRunText(s.lastRun);
+          runline.hidden = !t;
+          runline.textContent = t || '';
         })
         .catch(() => { status.textContent = 'status unavailable'; install.hidden = false; });
       install.addEventListener('click', async () => {
@@ -168,7 +186,9 @@ export default async function mount(container, params, ctx) {
         finally { install.disabled = false; }
       });
       probe();                                             // async fill-in; render doesn't block on it
-      list.append(el('li', {}, el('code', {}, `${w.owner}/${w.repo}`), el('span', { class: 'muted' }, ` — ${w.org_label} `), install, status));
+      list.append(el('li', { class: 'wf-item' },
+        el('div', { class: 'wf-item__head' }, el('code', {}, `${w.owner}/${w.repo}`), el('span', { class: 'muted' }, ` — ${w.org_label} `), install, status),
+        runline));
     }
     sec.append(list);
     return sec;

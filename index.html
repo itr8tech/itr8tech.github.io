@@ -35,9 +35,6 @@
       <a href="#/help">Help</a>
       <a href="#/sync" id="nav-sync" class="nav-sync">Sync<span id="sync-badge" class="sync-badge" hidden aria-hidden="true"></span></a>
     </nav>
-    <button id="theme-toggle" class="btn" type="button">
-      <span class="theme-toggle__label">Theme</span>
-    </button>
   </header>
 
   <div id="role-banner" class="banner" role="status" hidden></div>
@@ -45,7 +42,12 @@
   <!-- ONE persistent view region. Router replaces its CHILDREN only (stable aria-busy/focus target). -->
   <main id="view" class="app-main" tabindex="-1" aria-busy="true"></main>
 
-  <footer class="app-footer"><small>PathCurator v2 · local-first · bf078f9</small></footer>
+  <footer class="app-footer">
+    <small>PathCurator v2 · local-first · 95da0d0</small>
+    <button id="theme-toggle" class="btn" type="button">
+      <span class="theme-toggle__label">Theme</span>
+    </button>
+  </footer>
 
   <!-- ONE announcer pair, owned by a11y.js; never removed/recreated. -->
   <div id="live-polite"    class="visually-hidden" role="status" aria-live="polite"  aria-atomic="true"></div>

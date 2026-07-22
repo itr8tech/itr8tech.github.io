@@ -81,7 +81,7 @@
     padding:var(--space-3) var(--space-5); background:color-mix(in srgb,var(--surface) 88%,transparent);
     backdrop-filter:saturate(1.4) blur(8px); border-bottom:1px solid var(--border); }
   .brand{ font-weight:700; font-size:var(--text-lg); text-decoration:none; color:var(--text); }
-  .app-nav{ margin-inline-start:auto; display:flex; align-items:center; gap:var(--space-4); } .app-nav + .btn{ margin-inline-start:var(--space-3); }
+  .app-nav{ margin-inline-start:auto; display:flex; align-items:center; gap:var(--space-4); }
   .nav-sync{ display:inline-flex; align-items:center; }
   .sync-badge{ display:inline-flex; align-items:center; justify-content:center; min-width:1.35em; height:1.35em;
     margin-inline-start:.4em; padding:0 .35em; border-radius:var(--radius-pill); font-size:.72rem; font-weight:700;
@@ -90,7 +90,8 @@
     background:color-mix(in srgb,var(--accent) 14%,transparent); }
   .sync-badge--danger{ color:#fff; background:var(--danger,#c0392b); border-color:transparent; }
   .app-main{ width:min(72rem,100% - var(--space-6)); margin-inline:auto; padding-block:var(--space-6); }
-  .app-footer{ border-top:1px solid var(--border); padding:var(--space-5); color:var(--muted); text-align:center; }
+  .app-footer{ border-top:1px solid var(--border); padding:var(--space-5); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; gap:var(--space-4); flex-wrap:wrap; }
   .skip-link{ position:absolute; left:var(--space-3); top:-3rem; background:var(--accent); color:var(--accent-text);
     padding:var(--space-2) var(--space-3); border-radius:var(--radius); transition:top var(--dur) var(--ease); z-index:200; }
   .skip-link:focus{ top:var(--space-3); }

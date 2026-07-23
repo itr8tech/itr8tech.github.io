@@ -77,6 +77,7 @@ export default async function mount(container, params, ctx) {
     const [p, exempt] = await Promise.all([ctx.db.getPathway(params.id), ctx.db.listExemptDomains()]);
     exemptDomains = exempt.map((e) => e.domain);
     pathwayId = p?.id ?? null;
+    const pws = p?.workspace_id ? await ctx.db.getWorkspace(p.workspace_id).catch(() => null) : null;
     teardownReorder?.(); imgScope.dispose(); clear(root);
     if (!p) {
       root.append(el('h1', { 'data-view-heading': true, tabindex: -1 }, 'Pathway not found'),
@@ -100,7 +101,13 @@ export default async function mount(container, params, ctx) {
       // P6/P7 exports (all formats in one dialog): read-shaped → usable from a follower tab too
       btn('⬇ Export…', { class: 'btn', 'data-focus-key': `export-pathway:${p.id}`,
         title: 'Export as a data file, interactive web page, spreadsheet, feed, or browser bookmarks' },
-        (ev) => openExportDialog({ pathway: p, invoker: ev.currentTarget, ctx }))));
+        (ev) => openExportDialog({ pathway: p, invoker: ev.currentTarget, ctx })),
+      // P10 1b: repo-published SCORM package (Moodle auto-update) — connected workspaces only
+      pws?.owner && pws?.repo
+        ? btn('🌐 Publish…', { class: 'btn', 'data-focus-key': `publish-pathway:${p.id}`, 'data-publish-open': p.id,
+          title: 'Keep a SCORM package published in the repository — Moodle activities pointed at its URL update automatically' },
+          (ev) => openPublishDialog({ pathway: p, ws: pws, invoker: ev.currentTarget, ctx }))
+        : null));
 
     if (p.steps.length) root.append(el('div', { class: 'steps-toolbar' },
       el('button', { type: 'button', class: 'btn btn--subtle', 'data-collapse-all': 'collapse' }, 'Collapse all')));
@@ -263,4 +270,110 @@ async function openExportDialog({ pathway: p, invoker, ctx }) {
   dlg.addEventListener('close', () => { dlg.remove(); invoker?.focus?.(); }, { once: true });
   dlg.showModal();
   form.querySelector('h2').focus();
+}
+
+// P10 1b: the publish dialog — the auto-update loop in one place, self-explanatory. The package
+// (packages/<id>.zip) rides ordinary commits whenever this pathway changes (opt-in toggle), so
+// "publishing" after day zero is just… committing. Publish now is for the first publish (and is
+// blocked while the workspace has uncommitted changes — a publish commit must not carry
+// unreviewed edits along uninvited).
+async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
+  const { el } = await import('../dom.js');
+  const { toast } = await import('../toast.js');
+  const dlg = el('dialog', { class: 'pc-editor' });
+  const err = el('p', { class: 'field-error', role: 'alert' });
+  const status = el('p', { class: 'muted', role: 'status' }, 'Checking the repository…');
+  const urlInput = el('input', { type: 'text', readonly: true, 'aria-label': 'Published package URL', hidden: true, style: 'flex:1;min-width:0' });
+  const copyBtn = el('button', { type: 'button', class: 'btn btn--sm', hidden: true }, 'Copy URL');
+  const toggle = el('input', { type: 'checkbox', 'data-publish-toggle': p.id });
+  const publishBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-requires-primary': true, 'data-publish-now': p.id }, 'Publish now');
+  const publishHint = el('p', { class: 'muted publish-hint' });
+  const mbzBtn = el('button', { type: 'button', class: 'btn', hidden: true }, '⬇ Auto-updating Moodle course (.mbz)');
+
+  toggle.checked = false;
+  ctx.db.getSetting(`publish_scorm:${p.id}`).then((v) => { toggle.checked = v === '1'; }).catch(() => {});
+  toggle.addEventListener('change', () => {
+    ctx.sync.setScormPublish(p.id, toggle.checked)
+      .then(() => ctx.announce(toggle.checked
+        ? 'Publishing on: commits that change this pathway will also update the package.'
+        : 'Publishing off: the committed package stays but will no longer be updated.'))
+      .catch((e) => { err.textContent = e.message || 'Could not save.'; toggle.checked = !toggle.checked; });
+  });
+
+  async function probe() {
+    try {
+      const info = await ctx.sync.scormPublishInfo(ws.id, p.id);
+      const st = await ctx.sync._computeStatus(ws.id);
+      if (!info) { status.textContent = 'This workspace isn’t connected to a repository.'; publishBtn.disabled = true; return; }
+      if (info.exists) {
+        status.textContent = 'Published ✓ — the package is in the repository. Paste this URL into Moodle once:';
+        urlInput.value = info.url; urlInput.hidden = false; copyBtn.hidden = false; mbzBtn.hidden = false;
+        publishBtn.textContent = 'Publish update now';
+      } else {
+        status.textContent = 'Not published yet — no package in the repository.';
+        publishBtn.textContent = 'Publish now';
+      }
+      if (st.dirty) {
+        publishBtn.disabled = true;
+        publishHint.textContent = 'You have uncommitted changes — commit them first (with the toggle on, the commit publishes the package too).';
+      } else {
+        publishBtn.disabled = false;
+        publishHint.textContent = info.exists
+          ? 'Only needed after app updates or an attribution change — ordinary edits publish through normal commits.'
+          : 'Commits the current pathway as packages/' + p.id + '.zip. After that, the toggle keeps it fresh automatically.';
+      }
+    } catch (e) { status.textContent = 'Couldn’t reach the repository (offline, or the token expired).'; publishBtn.disabled = true; }
+  }
+
+  copyBtn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(urlInput.value); toast('URL copied.'); }
+    catch { urlInput.hidden = false; urlInput.select(); toast('Copy blocked — the URL is selected, press Ctrl/⌘ C.'); }
+  });
+  publishBtn.addEventListener('click', async () => {
+    err.textContent = ''; publishBtn.disabled = true; dlg.setAttribute('aria-busy', 'true');
+    try {
+      const r = await ctx.sync.publishScorm(ws.id, p.id);
+      if (!r.committed) throw new Error(r.reason === 'remote-ahead' ? 'The repository moved — pull first, then publish.' : 'Nothing was committed.');
+      ctx.announce('Package published to the repository.');
+      await probe();
+    } catch (e) { err.textContent = e.message || 'Could not publish.'; publishBtn.disabled = false; }
+    finally { dlg.removeAttribute('aria-busy'); }
+  });
+  mbzBtn.addEventListener('click', async () => {
+    err.textContent = '';
+    try {
+      const { buildPathwayMoodleCourse } = await import('../publish-moodle.js');
+      const { downloadFile } = await import('../download.js');
+      const attribution = (await ctx.db.getSetting('publish_attribution')) === '1';
+      const out = await buildPathwayMoodleCourse(ctx.db, { id: p.id, attribution, packageUrl: urlInput.value });
+      downloadFile(out.filename, out.content, 'application/zip');
+      ctx.announce(`Exported ${out.filename} — restore it in Moodle; the course checks the URL daily.`);
+    } catch (e) { err.textContent = e.message || 'Could not build the course file.'; }
+  });
+
+  const form = el('form', { novalidate: true, 'aria-labelledby': 'pub-h' },
+    el('h2', { id: 'pub-h', 'data-view-heading': true, tabindex: -1 }, `Publish — ${p.name}`),
+    el('p', {}, 'Keeps a SCORM package of this pathway committed in the repository at a stable URL. ',
+      'A Moodle activity pointed at that URL (with auto-update on) refreshes itself — fix a link here, commit, and every course follows within a day.'),
+    status,
+    el('div', { class: 'row', style: 'align-items:center' }, urlInput, copyBtn),
+    el('label', { class: 'field-label', style: 'display:flex;gap:.5rem;align-items:center;font-weight:400' }, toggle,
+      ' Keep it published — every commit that changes this pathway also updates the package'),
+    publishHint,
+    err,
+    el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn' }, 'Close'), mbzBtn, publishBtn),
+    el('details', { class: 'publish-notes' }, el('summary', {}, 'Moodle setup notes'),
+      el('ul', {},
+        el('li', {}, 'The repository must be public — Moodle downloads the package without credentials.'),
+        el('li', {}, 'A site admin must enable URL packages once: Site administration → Plugins → SCORM package → “downloaded package” type.'),
+        el('li', {}, 'In the activity: paste the URL as the Package, set Auto-update frequency to “Every day”.'),
+        el('li', {}, 'Or skip the setup: download the auto-updating course file above and restore it as a new course.'))));
+  form.addEventListener('submit', (e) => e.preventDefault());
+  form.querySelector('.form-actions .btn').addEventListener('click', () => dlg.close('cancel'));
+  dlg.append(form);
+  document.body.append(dlg);
+  dlg.addEventListener('close', () => { dlg.remove(); invoker?.focus?.(); }, { once: true });
+  dlg.showModal();
+  form.querySelector('h2').focus();
+  probe();
 }

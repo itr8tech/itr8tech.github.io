@@ -117,6 +117,13 @@ async function boot() {
     db, secrets,
     makeClient: (ws, token) => githubFactory({ owner: ws.owner, repo: ws.repo, branch: ws.branch || 'main', path: ws.path || '', token }),
     isPrimary: () => db.isPrimary(),
+    // P10 1b: published SCORM packages ride commits. Injected so the data layer never imports UI
+    // modules; the builder honors the curator's stored attribution choice.
+    buildScormPackage: async (pathwayId) => {
+      const { buildPathwayScorm } = await import('./publish-scorm.js');
+      const attribution = (await db.getSetting('publish_attribution')) === '1';
+      return buildPathwayScorm(db, { id: pathwayId, attribution });
+    },
   });
   ctx.sync = sync;
   window.__pcSync = sync;                 // test seam (parity with window.__pc / window.__P2)

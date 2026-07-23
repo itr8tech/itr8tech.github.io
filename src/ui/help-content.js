@@ -169,7 +169,20 @@ the course. Their progress is saved **by the LMS**, per learner, and survives lo
 computers. (The page's own save/restore buttons disappear here, because the LMS has taken over
 that job.)
 
-### When you fix or improve the pathway
+### Keeping courses fresh — automatic (recommended)
+
+If the pathway's workspace is connected to a **public** GitHub repository, open the pathway and
+press **🌐 Publish…**. This keeps a SCORM package committed in the repository at a stable URL.
+Point the Moodle activity at that URL (paste it as the Package, set *Auto-update frequency* to
+"Every day") — or download the **auto-updating course file** from the same dialog and restore it,
+already wired up. From then on: fix a link in PathCurator, commit, and every course refreshes
+itself within a day. Nobody touches Moodle again.
+
+Two requirements, both one-time: the repository must be public (Moodle downloads the package
+without credentials), and a Moodle admin must enable URL packages (*Site administration →
+Plugins → SCORM package → "downloaded package"*).
+
+### Keeping courses fresh — manual
 
 Export a fresh SCORM package and use the activity's settings to **replace the package file** —
 don't create a new activity. PathCurator builds every package of the same pathway with the same

@@ -34,7 +34,11 @@ const ID = { course: 101, courseCtx: 1000, sysCtx: 1, category: 1, module: 200, 
 const MOODLE_VERSION = '2021051700';            // 3.11 — the compatibility floor
 const MOODLE_RELEASE = '3.11';
 
-export async function buildPathwayMoodleCourse(db, { id, attribution = false }) {
+// packageUrl (optional): the auto-updating variant — the activity points at a published package
+// URL (scormtype "localsync") and re-checks it DAILY (updatefreq 2), so replacing content means
+// committing in PathCurator, never touching Moodle. The extracted content still ships in the
+// backup as the day-zero copy until the first cron fetch.
+export async function buildPathwayMoodleCourse(db, { id, attribution = false, packageUrl = null }) {
   const pkg = await buildPathwayScorm(db, { id, attribution });
   const { name, slug } = pkg.meta;
   const sid = scormIdentifier(pkg.meta.id);
@@ -250,8 +254,8 @@ ${fileRec(ID.fileContentDir, 'content', EMPTY_SHA1, '.', 0, NULLV)}
     <name>${title}</name>
     <intro></intro>
     <introformat>1</introformat>
-    <scormtype>local</scormtype>
-    <reference>${pkgName}</reference>
+    <scormtype>${packageUrl ? 'localsync' : 'local'}</scormtype>
+    <reference>${packageUrl ? xmlEsc(packageUrl) : pkgName}</reference>
     <sha1hash>${pkgHash}</sha1hash>
     <md5hash></md5hash>
     <revision>1</revision>
@@ -266,7 +270,7 @@ ${fileRec(ID.fileContentDir, 'content', EMPTY_SHA1, '.', 0, NULLV)}
     <masteryoverride>1</masteryoverride>
     <displayattemptstatus>0</displayattemptstatus>
     <displaycoursestructure>0</displaycoursestructure>
-    <updatefreq>0</updatefreq>
+    <updatefreq>${packageUrl ? 2 : 0}</updatefreq>
     <skipview>2</skipview>
     <hidebrowse>1</hidebrowse>
     <hidetoc>3</hidetoc>
@@ -399,5 +403,5 @@ ${fileRec(ID.fileContentDir, 'content', EMPTY_SHA1, '.', 0, NULLV)}
     { name: `files/${EMPTY_SHA1.slice(0, 2)}/${EMPTY_SHA1}`, data: new Uint8Array(0) },
   ];
 
-  return { content: buildZip(entries), filename: `${slug}--moodle-course--${today()}.mbz` };
+  return { content: buildZip(entries), filename: `${slug}--moodle-course${packageUrl ? '-auto' : ''}--${today()}.mbz` };
 }

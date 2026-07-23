@@ -12,6 +12,16 @@ const READONLY = 'This tab is read-only — PathCurator is active in another tab
 
 const joinPath = (base, p) => (base ? `${String(base).replace(/\/+$/, '')}/${p}` : p);
 
+// Uint8Array → base64 (chunked; a spread would overflow the stack on ~100 KB+ packages).
+function bytesToBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+// P10 1b: the per-pathway "keep a SCORM package published in the repo" opt-in lives in settings.
+const PUBLISH_KEY = (pathwayId) => `publish_scorm:${pathwayId}`;
+const packagePath = (P, pathwayId) => joinPath(P, `packages/${pathwayId}.zip`);
+
 // P5: the committed audit/overrides.json is compared via a STABLE string (sorted URLs, fixed entry
 // field order), so JSON key order can never fake a difference.
 const stableOverrides = (o = {}) => JSON.stringify(Object.keys(o).sort().map((u) => [u, o[u]?.available ? 1 : 0, o[u]?.method, o[u]?.setAt]));
@@ -37,7 +47,7 @@ function defaultMessage(ser) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Update PathCurator workspace';
 }
 
-export function createSync({ db, secrets, makeClient, isPrimary, now = () => Date.now() }) {
+export function createSync({ db, secrets, makeClient, isPrimary, now = () => Date.now(), buildScormPackage = null }) {
   const statusByWs = new Map();          // wsId → derived status object
   const conflicts = new Map();           // wsId → remote sha (or null) when a clobber was averted
   const pendingPull = new Map();         // wsId → pull context awaiting interactive review
@@ -109,7 +119,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
   }
 
   // The atomic, no-silent-clobber commit. Works for the first commit (empty repo) too.
-  async function commit(wsId, { message } = {}) {
+  async function commit(wsId, { message, publishNow = null } = {}) {
     if (!isPrimary()) throw new Error(READONLY);
     const ws = await db.getWorkspace(wsId);
     if (!ws || !ws.owner || !ws.repo) throw new Error('This workspace is not connected to a repo.');
@@ -132,7 +142,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     const exSer = await db.serializeExemptDomains();
     const exChanged = stableExempt(exSer.exempt) !== stableExempt((await getExemptState(wsId))?.exempt || []);
     const contentChanged = !!(ser.changedCount || ser.deletedCount || ser.manifestChanged);
-    if (!contentChanged && !ovChanged && !exChanged) {
+    if (!contentChanged && !ovChanged && !exChanged && !publishNow) {
       await refreshOne(wsId);
       return { ok: true, committed: false, reason: 'no-changes' };
     }
@@ -189,8 +199,29 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
       entries.push({ path: joinPath(P, 'audit/config.json'), mode: '100644', type: 'blob', sha: exBlobSha });
     }
 
+    // P10 1b: published SCORM packages ride the same commit — side files like the audit channel,
+    // hash-excluded, so they can never dirty a pathway. Rebuilt ONLY for opted-in pathways that
+    // CHANGED in this commit (or an explicit publishNow) — packages never churn without content
+    // movement. Moodle activities pointed at the package URL then auto-update on their own cron.
+    let publishedCount = 0;
+    if (buildScormPackage) {
+      const changedIds = new Set(Object.keys(ser.pathwayHashes).filter((id) => prior[id]?.contentHash !== ser.pathwayHashes[id]));
+      const wanted = new Set();
+      for (const id of Object.keys(ser.pathwayHashes)) {
+        if (changedIds.has(id) && (await db.getSetting(PUBLISH_KEY(id))) === '1') wanted.add(id);
+      }
+      if (publishNow && ser.pathwayHashes[publishNow]) wanted.add(publishNow);
+      for (const id of wanted) {
+        const pkg = await buildScormPackage(id);
+        const sha = await client.createBlob({ content: bytesToBase64(pkg.content), encoding: 'base64' });
+        entries.push({ path: packagePath(P, id), mode: '100644', type: 'blob', sha });
+        publishedCount++;
+      }
+    }
+
     const treeSha = await client.createTree({ baseTreeSha: baseCommit?.treeSha, entries });
-    const commitMessage = message || (contentChanged ? defaultMessage(ser) : 'Update audit settings');
+    const commitMessage = message || (contentChanged ? defaultMessage(ser)
+      : publishedCount ? `Publish SCORM package${publishedCount === 1 ? '' : 's'}` : 'Update audit settings');
     const commitSha = await client.createCommit({
       message: commitMessage, treeSha, parents: ref ? [ref.sha] : [] });
 
@@ -218,8 +249,27 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     clearConflict(wsId);
     await refreshOne(wsId);
     await recordSyncAction(wsId, { type: 'commit', message: commitMessage, changed: ser.changedCount, deleted: ser.deletedCount, sha: commitSha });
-    return { ok: true, committed: true, commitSha, changed: ser.changedCount, deleted: ser.deletedCount };
+    return { ok: true, committed: true, commitSha, changed: ser.changedCount, deleted: ser.deletedCount, published: publishedCount };
   }
+
+  // P10 1b: the publish surface for the UI. Info is a cheap repo probe (does packages/<id>.zip
+  // exist, and what URL does Moodle need); publishScorm is a commit carrying (at least) the
+  // package — callers should ensure the workspace is otherwise clean so nothing rides uninvited.
+  async function scormPublishInfo(wsId, pathwayId) {
+    const ws = await db.getWorkspace(wsId);
+    if (!ws?.owner || !ws.repo) return null;
+    const token = await db.getWorkspacePat(wsId);
+    if (!token) return null;
+    const client = makeClient(ws, token);
+    const br = ws.branch || 'main';
+    const path = packagePath(ws.path || '', pathwayId);
+    const head = await client.headFile(ws.owner, ws.repo, path, br);
+    return { exists: head.exists, path,
+      enabled: (await db.getSetting(PUBLISH_KEY(pathwayId))) === '1',
+      url: `https://raw.githubusercontent.com/${ws.owner}/${ws.repo}/${br}/${path}` };
+  }
+  const setScormPublish = (pathwayId, on) => db.setSetting(PUBLISH_KEY(pathwayId), on ? '1' : '0');
+  const publishScorm = (wsId, pathwayId) => commit(wsId, { publishNow: pathwayId });
 
   // #/sync: remember the last commit/pull performed FROM THIS BROWSER, at action time — showing
   // "when did I last sync" must not need a network round-trip. Cosmetic; failures never surface.
@@ -715,6 +765,7 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     refreshOne, refreshAll,
     handleChange: (evt) => { if (!evt || evt.entity === '*' || ['pathways', 'steps', 'bookmarks', 'workspaces', 'sync'].includes(evt.entity)) refreshAll(); },
     commit, initialize, pull, resolvePull, importLegacy, installAuditTooling, auditToolingStatus, remoteHead,
+    scormPublishInfo, setScormPublish, publishScorm,
     fetchCommittedPathways, discardLocalChanges,
     getPendingPull: (wsId) => pendingPull.get(wsId) || null,
     getAutoCommit, setAutoCommit, startTimers, stopTimers,

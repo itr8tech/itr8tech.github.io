@@ -307,7 +307,8 @@ async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
       const info = await ctx.sync.scormPublishInfo(ws.id, p.id);
       const st = await ctx.sync._computeStatus(ws.id);
       if (!info) { status.textContent = 'This workspace isn’t connected to a repository.'; publishBtn.disabled = true; return; }
-      privWarn.hidden = info.repoPrivate !== true;
+      const priv = info.repoPrivate === true;
+      privWarn.hidden = !priv;
       if (info.exists) {
         status.textContent = 'Published ✓ — the package is in the repository. Paste this URL into Moodle once:';
         urlInput.value = info.url; urlInput.hidden = false; copyBtn.hidden = false; mbzBtn.hidden = false;
@@ -316,7 +317,14 @@ async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
         status.textContent = 'Not published yet — no package in the repository.';
         publishBtn.textContent = 'Publish now';
       }
-      if (st.dirty) {
+      // A private repo doesn't just deserve a warning — the loop CANNOT work, so publishing is
+      // paused outright (opting OUT stays possible; opting in doesn't).
+      mbzBtn.disabled = priv;
+      toggle.disabled = priv && !toggle.checked;
+      if (priv) {
+        publishBtn.disabled = true;
+        publishHint.textContent = 'Publishing is paused while the repository is private. Make it public (repo Settings → General → Change visibility), then reopen this dialog.';
+      } else if (st.dirty) {
         publishBtn.disabled = true;
         publishHint.textContent = 'You have uncommitted changes — commit them first (with the toggle on, the commit publishes the package too).';
       } else {

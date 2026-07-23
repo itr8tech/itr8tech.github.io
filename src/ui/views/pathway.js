@@ -283,6 +283,8 @@ async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
   const dlg = el('dialog', { class: 'pc-editor' });
   const err = el('p', { class: 'field-error', role: 'alert' });
   const status = el('p', { class: 'muted', role: 'status' }, 'Checking the repository…');
+  const privWarn = el('p', { class: 'field-error', 'data-publish-private': p.id, hidden: true },
+    '⚠ This repository is PRIVATE. Moodle downloads the package without credentials, so the URL will 404 — the auto-update loop can’t work until the repository is public.');
   const urlInput = el('input', { type: 'text', readonly: true, 'aria-label': 'Published package URL', hidden: true, style: 'flex:1;min-width:0' });
   const copyBtn = el('button', { type: 'button', class: 'btn btn--sm', hidden: true }, 'Copy URL');
   const toggle = el('input', { type: 'checkbox', 'data-publish-toggle': p.id });
@@ -305,6 +307,7 @@ async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
       const info = await ctx.sync.scormPublishInfo(ws.id, p.id);
       const st = await ctx.sync._computeStatus(ws.id);
       if (!info) { status.textContent = 'This workspace isn’t connected to a repository.'; publishBtn.disabled = true; return; }
+      privWarn.hidden = info.repoPrivate !== true;
       if (info.exists) {
         status.textContent = 'Published ✓ — the package is in the repository. Paste this URL into Moodle once:';
         urlInput.value = info.url; urlInput.hidden = false; copyBtn.hidden = false; mbzBtn.hidden = false;
@@ -356,6 +359,7 @@ async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
     el('p', {}, 'Keeps a SCORM package of this pathway committed in the repository at a stable URL. ',
       'A Moodle activity pointed at that URL (with auto-update on) refreshes itself — fix a link here, commit, and every course follows within a day.'),
     status,
+    privWarn,
     el('div', { class: 'row', style: 'align-items:center' }, urlInput, copyBtn),
     el('label', { class: 'field-label', style: 'display:flex;gap:.5rem;align-items:center;font-weight:400' }, toggle,
       ' Keep it published — every commit that changes this pathway also updates the package'),

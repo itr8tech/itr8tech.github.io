@@ -78,6 +78,9 @@ export function createGitHubClient({
     },
     getCommit: (sha) => api('GET', `/git/commits/${sha}`)
       .then((c) => ({ sha: c.sha, treeSha: c.tree.sha, parents: (c.parents || []).map((p) => p.sha) })),
+    // Repo visibility — the publish flow must warn BEFORE Moodle discovers a private repo the
+    // hard way (its server fetches the package URL with no credentials).
+    getRepoMeta: () => api('GET', '').then((r) => ({ private: !!r.private, defaultBranch: r.default_branch || 'main' })),
     // Human-facing commit facts for the #/sync overview (message/author/date, not tree plumbing).
     getCommitMeta: (sha) => api('GET', `/git/commits/${sha}`)
       .then((c) => ({ sha: c.sha, message: c.message || '', author: c.author?.name || null, date: c.author?.date || null })),

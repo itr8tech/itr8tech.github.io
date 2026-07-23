@@ -264,7 +264,8 @@ export function createSync({ db, secrets, makeClient, isPrimary, now = () => Dat
     const br = ws.branch || 'main';
     const path = packagePath(ws.path || '', pathwayId);
     const head = await client.headFile(ws.owner, ws.repo, path, br);
-    return { exists: head.exists, path,
+    const repoPrivate = (await client.getRepoMeta().catch(() => null))?.private ?? null;   // null = unknown
+    return { exists: head.exists, path, repoPrivate,
       enabled: (await db.getSetting(PUBLISH_KEY(pathwayId))) === '1',
       url: `https://raw.githubusercontent.com/${ws.owner}/${ws.repo}/${br}/${path}` };
   }

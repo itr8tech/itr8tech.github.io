@@ -182,6 +182,12 @@ Two requirements, both one-time: the repository must be public (Moodle downloads
 without credentials), and a Moodle admin must enable URL packages (*Site administration →
 Plugins → SCORM package → "downloaded package"*).
 
+Heads-up on that admin toggle: with it still off, an auto-updating course **restores and plays
+fine** — but saving the activity's settings fails with a database error about *"Column
+'reference' cannot be null"*. That error means "enable the downloaded-package type", nothing
+more. Courses restored before the toggle was flipped are fine afterwards; nothing needs
+re-importing.
+
 ### Keeping courses fresh — manual
 
 Export a fresh SCORM package and use the activity's settings to **replace the package file** —

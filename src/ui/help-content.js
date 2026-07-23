@@ -180,7 +180,10 @@ itself within a day. Nobody touches Moodle again.
 
 Two requirements, both one-time: the repository must be public (Moodle downloads the package
 without credentials), and a Moodle admin must enable URL packages (*Site administration →
-Plugins → SCORM package → "downloaded package"*).
+Plugins → SCORM package → "Downloaded package"*). Mind the look-alike toggle next to it:
+**"External SCORM manifest" is a different mode** — it wants a URL ending in
+\`imsmanifest.xml\`, rejects package zips as *"Invalid URL specified"*, and in the activity's
+Type dropdown it can appear selected when Downloaded package isn't enabled yet.
 
 Heads-up on that admin toggle: with it still off, an auto-updating course **restores and plays
 fine** — but saving the activity's settings fails with a database error about *"Column

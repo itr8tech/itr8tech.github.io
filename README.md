@@ -1,4 +1,4 @@
 # PathCurator v2 — test deployment
 Auto-pushed snapshot of the app's runtime files from the private `pathcurator-app`
-repo (commit `9bd9815`). Do not edit here. The app is local-first: no data lives in
+repo (commit `6d785b0`). Do not edit here. The app is local-first: no data lives in
 this repo or on this host — everything you create stays in your own browser.

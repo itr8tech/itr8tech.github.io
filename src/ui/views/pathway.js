@@ -365,7 +365,7 @@ async function openPublishDialog({ pathway: p, ws, invoker, ctx }) {
     el('details', { class: 'publish-notes' }, el('summary', {}, 'Moodle setup notes'),
       el('ul', {},
         el('li', {}, 'The repository must be public — Moodle downloads the package without credentials.'),
-        el('li', {}, 'A site admin must enable URL packages once: Site administration → Plugins → SCORM package → “downloaded package” type.'),
+        el('li', {}, 'A site admin must enable URL packages once: Site administration → Plugins → SCORM package → “Downloaded package” type — NOT its neighbour “External SCORM manifest”, which wants an imsmanifest.xml URL and rejects zips as “Invalid URL”.'),
         el('li', {}, 'Symptom of that toggle being off: the course restores and plays fine, but SAVING the activity’s settings fails with “Column \u2018reference\u2019 cannot be null” — the form omits the Package URL field until the type is enabled.'),
         el('li', {}, 'In the activity: paste the URL as the Package, set Auto-update frequency to “Every day”.'),
         el('li', {}, 'Or skip the setup: download the auto-updating course file above and restore it as a new course.'))));
